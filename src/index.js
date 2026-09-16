@@ -29,7 +29,8 @@ const startupJobs = [
   ['war', bool('STARTUP_WAR_SYNC'), syncWar],
   ['history', bool('STARTUP_HISTORY_SYNC'), syncHistory],
   ['capital', bool('STARTUP_CAPITAL_SYNC'), syncCapital],
-  ['cwl', bool('STARTUP_CWL_SYNC'), syncCwl]
+  ['cwl', bool('STARTUP_CWL_SYNC'), syncCwl],
+  ['player-snapshot', bool('STARTUP_PLAYER_SNAPSHOT_SYNC'), () => syncClan(true)]
 ];
 
 let syncRunning = false;
