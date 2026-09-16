@@ -14,6 +14,11 @@ test('routes normal war questions by broad dataset and generic operation', () =>
   assert.equal(opponent.operation, 'opponent');
   assert.equal(opponent.intent, 'general');
 
+  const fighting = buildQueryPlan('Who are we fighting right now?');
+  assert.equal(fighting.scope, 'war');
+  assert.equal(fighting.operation, 'opponent');
+  assert.equal(fighting.intent, 'general');
+
   const state = buildQueryPlan('What is the current war state?');
   assert.equal(state.scope, 'war');
   assert.equal(state.operation, 'state');
