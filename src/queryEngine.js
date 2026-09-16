@@ -18,6 +18,9 @@ export function understandQuestion(question = '') {
     : /\b(?:member|members|player|players|clan|donation|donations|trophies|town hall|role|elder|leader|co-leader)\b/.test(q) ? 'clan'
     : 'general';
 
+  const asksClanIdentity = /\b(?:what(?:'s| is)\s+(?:my|our)\s+clan(?:'s)?\s+(?:name|tag|id)|(?:my|our)\s+clan\s+(?:name|tag|id)|clan\s+(?:name|tag|id)|what\s+clan\s+am\s+i\s+in)\b/.test(q);
+  const identityField = /\b(?:tag|id)\b/.test(q) ? 'tag' : 'name';
+
   const unused = /\b(?:unused|un-used|no|zero) attacks?\b/.test(q)
     || /\b(?:hasn['’]?t|haven['’]?t|didn['’]?t|didnt) (?:use|used|make|made|do|done|attack|attacked)/.test(q)
     || /\b(?:yet to|without) (?:use|make|do) (?:any )?attacks?\b/.test(q);
@@ -32,7 +35,8 @@ export function understandQuestion(question = '') {
   const count = /\b(?:how many|count|number of)\b/.test(q);
 
   let intent = 'general';
-  if ((scope === 'war' || scope === 'cwl' || scope === 'capital') && (unused || remaining || used !== null)) intent = 'war_attack_usage';
+  if (asksClanIdentity) intent = 'clan_identity';
+  else if ((scope === 'war' || scope === 'cwl' || scope === 'capital') && (unused || remaining || used !== null)) intent = 'war_attack_usage';
   else if (donation && (asksLowest || asksHighest || count)) intent = 'donation_query';
   else if (trophies && (asksLowest || asksHighest || count)) intent = 'trophy_query';
   else if (role) intent = 'role_query';
@@ -40,6 +44,7 @@ export function understandQuestion(question = '') {
   return {
     scope,
     intent,
+    identity_field: identityField,
     attacks_used: used,
     attacks_remaining: remaining ? 1 : null,
     unused,
