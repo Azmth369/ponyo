@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import { syncClan, syncWar, syncHistory, syncCapital, syncCwl, run } from './sync.js';
+import { syncClan, syncWar, syncHistory, syncCwl, run } from './sync.js';
+import { syncCapital } from './capitalSync.js';
 
 const bool = (name, fallback = true) => {
   const value = process.env[name];
