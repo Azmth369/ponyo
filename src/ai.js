@@ -82,7 +82,7 @@ async function getWarAttacksForHistory(playerTag){if(!playerTag)return[];const w
 function formatIndiaDateTime(date) { const parts = new Intl.DateTimeFormat('en-GB', { timeZone:'Asia/Kolkata', day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:false }).formatToParts(date); const values=Object.fromEntries(parts.map(p=>[p.type,p.value])); return `${values.day}/${values.month}/${values.year} ${values.hour}:${values.minute} IST`; }
 function formatDiscordTimestamps(text) {
   let output=String(text??'');
-  output=output.replace(/(#[A-Z0-9]+:)(\d{8}T\d{6}(?:\.\d{1,3})?Z)/gi,(full,prefix,stamp)=>{const year=stamp.slice(0,4),month=stamp.slice(4,6),day=stamp.slice(6,8),hour=stamp.slice(9,11),minute=stamp.slice(11,13),second=stamp.slice(11,13),millis=stamp.match(/\.(\d{1,3})/)?.[1]??'000';const isoStamp=`${year}-${month}-${day}T${hour}:${minute}:${second}.${millis.padEnd(3,'0')}Z`;return `${prefix}${formatIndiaDateTime(new Date(isoStamp))}`;});
+  output=output.replace(/(#[A-Z0-9]+:)(\d{8}T\d{6}(?:\.\d{1,3})?Z)/gi,(full,prefix,stamp)=>{const year=stamp.slice(0,4),month=stamp.slice(4,6),day=stamp.slice(6,8),hour=stamp.slice(9,11),minute=stamp.slice(11,13),second=stamp.slice(13,15),millis=stamp.match(/\.(\d{1,3})/)?.[1]??'000';const isoStamp=`${year}-${month}-${day}T${hour}:${minute}:${second}.${millis.padEnd(3,'0')}Z`;return `${prefix}${formatIndiaDateTime(new Date(isoStamp))}`;});
   output=output.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:?\d{2})\b/g,match=>{const date=new Date(match);return Number.isNaN(date.getTime())?match:formatIndiaDateTime(date);});
   return output.replace(/\b(20\d{2})-(\d{2})-(\d{2})\b/g,(_,year,month,day)=>`${day}/${month}/${year}`);
 }
