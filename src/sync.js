@@ -56,7 +56,9 @@ function normalWarRows(war, cwUid) {
     opponent_participants: (opponent?.members ?? []).map(m => ({ player_id: m.tag, name: m.name, map_position: m.mapPosition ?? null })),
     data: war
   };
-  const available = state === 'preparation' ? 2 : state === 'inWar' ? 2 : 0;
+  // A normal Clan War always grants two attacks. Keep this value even after the war
+  // has ended so historical participant rows can still answer remaining-attack queries.
+  const available = 2;
   const participants = members.map(m => {
     const attacks = m.attacks ?? [];
     const attackIds = attacks.map(a => uid(cwUid, m.tag, a.order ?? attacks.indexOf(a) + 1));
@@ -143,7 +145,6 @@ export async function syncHistory() {
   let saved = 0;
   for (const war of warlog.items ?? []) {
     const cwUid = uid(clanTag, war.startTime ?? war.createdDate, war.endTime ?? 'unknown');
-    // warlog is summary-only. It is safe for the session table, but never create fake attack rows.
     await saveNormalWar({ ...war, state: 'warEnded' }, cwUid);
     saved++;
   }
@@ -270,6 +271,21 @@ export async function syncCapital() {
     const attackLog = season.attackLog ?? [];
     const totalLoot = Number(season.capitalTotalLoot ?? season.totalLoot ?? 0);
     const raidsWon = Number(season.raidsCompleted ?? season.raidsWon ?? 0);
+    const attackUidByPlayer = new Map();
+    const bonusAttackByPlayer = new Set();
+    for (const entry of attackLog) {
+      for (const district of entry.districts ?? []) {
+        for (let i = 0; i < (district.attacks ?? []).length; i++) {
+          const a = district.attacks[i];
+          const attacker = a.attacker ?? {};
+          const attackerId = attacker.tag ?? a.attackerTag;
+          if (!attackerId) continue;
+          const attackUid = uid(seasonUid, attackerId, district.id ?? district.districtId ?? '', i + 1, a.attackTime ?? '');
+          if (!attackUidByPlayer.has(attackerId)) attackUidByPlayer.set(attackerId, attackUid);
+          if (Number(a.stars ?? 0) >= 3) bonusAttackByPlayer.add(attackerId);
+        }
+      }
+    }
     await upsert('capital_raid_season', [{
       generated_uid: seasonUid,
       battle_start: iso(season.startTime),
@@ -283,17 +299,22 @@ export async function syncCapital() {
       absentees_name: [],
       data: season
     }]);
-    if (members.length) await upsert('capital_raid_participants', members.map(m => ({
-      capital_raid_uid: seasonUid,
-      player_name: m.name,
-      player_id: m.tag,
-      total_attacks: Number(m.attacks ?? m.attackCount ?? 0),
-      total_loot_gained: Number(m.capitalResourcesLooted ?? 0),
-      capital_raid_attack_uid: null,
-      capital_raid_start: iso(season.startTime),
-      capital_raid_end: iso(season.endTime),
-      data: m
-    })));
+    if (members.length) await upsert('capital_raid_participants', members.map(m => {
+      const attacksUsed = Number(m.attacks ?? m.attackCount ?? 0);
+      const hasBonus = bonusAttackByPlayer.has(m.tag) || attacksUsed > 5;
+      return {
+        capital_raid_uid: seasonUid,
+        player_name: m.name,
+        player_id: m.tag,
+        attacks_used: attacksUsed,
+        attacks_available: hasBonus ? 6 : 5,
+        total_loot_gained: Number(m.capitalResourcesLooted ?? 0),
+        capital_raid_attack_uid: attackUidByPlayer.get(m.tag) ?? null,
+        capital_raid_start: iso(season.startTime),
+        capital_raid_end: iso(season.endTime),
+        data: m
+      };
+    }));
     for (const entry of attackLog) {
       const opponent = entry.defender ?? {};
       for (const district of entry.districts ?? []) {
