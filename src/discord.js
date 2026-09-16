@@ -24,6 +24,7 @@ const token = process.env.DISCORD_TOKEN;
 const clientId = process.env.DISCORD_CLIENT_ID;
 const guildId = process.env.DISCORD_GUILD_ID;
 const ponyoAlertChannelId = process.env.PONYO_ALERT_CHANNEL_ID;
+const cleanupGuildCommands = process.env.DISCORD_CLEANUP_GUILD_COMMANDS === 'true';
 
 if (!token || !clientId) throw new Error('DISCORD_TOKEN and DISCORD_CLIENT_ID are required');
 
@@ -59,8 +60,23 @@ const commands = [
 
 async function registerCommands() {
   const rest = new REST({ version: '10' }).setToken(token);
-  const route = guildId ? Routes.applicationGuildCommands(clientId, guildId) : Routes.applicationCommands(clientId);
+
+  if (cleanupGuildCommands) {
+    for (const guild of client.guilds.cache.values()) {
+      try {
+        await rest.put(Routes.applicationGuildCommands(clientId, guild.id), { body: [] });
+        console.log(`[discord] cleared guild-local commands in ${guild.name} (${guild.id})`);
+      } catch (error) {
+        console.error(`[discord] failed to clear guild-local commands in ${guild.name} (${guild.id})`, error);
+      }
+    }
+  }
+
+  const route = guildId
+    ? Routes.applicationGuildCommands(clientId, guildId)
+    : Routes.applicationCommands(clientId);
   await rest.put(route, { body: commands });
+  console.log(`[discord] registered ${commands.length} ${guildId ? 'guild' : 'global'} slash commands`);
 }
 
 function isListItem(line) {
@@ -284,7 +300,7 @@ async function sendPonyoAlert({ interaction, provider, question, error, classifi
   }
 }
 
-client.once('ready', () => console.log(`Discord bot online as ${client.user.tag}`));
+client.once('clientReady', readyClient => console.log(`Discord bot online as ${readyClient.user.tag}`));
 
 async function handleAiCommand(interaction, provider, generator) {
   await interaction.deferReply({ ephemeral: true });
@@ -430,8 +446,15 @@ setInterval(() => {
   cleanupAiState().catch(error => console.error('[discord] AI state cleanup failed', error));
 }, 6 * 60 * 60 * 1000).unref?.();
 
-registerCommands()
-  .then(() => client.login(token))
+client.login(token)
+  .then(async () => {
+    try {
+      await registerCommands();
+    } catch (error) {
+      console.error('[discord] command registration failed', error);
+      process.exitCode = 1;
+    }
+  })
   .catch(error => {
     console.error('[discord] startup failed', error);
     process.exitCode = 1;
