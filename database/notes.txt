@@ -1,5 +1,0 @@
-1. "clan_info" last activity feature will work by comparing latest data stored in "clan_info_snap" by current fetched data
-
-#we will store data in "clan_info_snap" of only past 12 records after which oldest data will get deleted, maintaining past 12 records data in "clan_info_snap".
-
-2. every spreadsheet made to store participants name in cw, capital raid and cwl, were design to store our clan player information only not of opponent.
