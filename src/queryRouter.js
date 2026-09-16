@@ -5,7 +5,6 @@ import {
   getCwlParticipants,
   getCapitalParticipants
 } from './retrieval.js';
-import { getClan } from './cocApi.js';
 import { understandQuestion, deterministicWarMembers, deterministicMemberMetric, deterministicRole } from './queryEngine.js';
 
 const nameOnly = row => ({ name: row.player_name ?? row.name, tag: row.player_id ?? row.tag });
@@ -33,35 +32,8 @@ function attackUsagePlan(plan, rows) {
 export async function runDeterministicQuery(question) {
   const plan = understandQuestion(question);
 
-  if (plan.intent === 'current_war_opponent') {
-    const current = await getCurrentWar();
-    const opponent = current?.opponent_clan_name ?? null;
-    return {
-      intent: 'current_war_opponent',
-      scope: 'war',
-      query: 'current_war_opponent',
-      result_count: opponent ? 1 : 0,
-      result: opponent ? [{ name: opponent, tag: current.opponent_clan_id ?? null }] : [],
-      event: current ? { war_key: current.war_key, state: current.state, start_time: current.start_time, end_time: current.end_time } : null,
-      note: opponent ? null : 'No current normal clan war opponent is available.'
-    };
-  }
-
-  if (plan.intent === 'clan_identity') {
-    // Identity is authoritative from the same configured clan endpoint used by
-    // the sync service. This avoids adding redundant clan_name/clan_id columns
-    // to every member row and keeps Supabase schema unchanged.
-    const clan = await getClan();
-    return {
-      intent: 'clan_identity',
-      scope: 'clan',
-      query: 'clan_identity',
-      field: plan.identity_field,
-      result_count: 1,
-      result: [{ name: clan.name ?? null, tag: clan.tag ?? null, members: Number(clan.members ?? clan.memberList?.length ?? 0) }]
-    };
-  }
-
+  // Only use deterministic execution for high-confidence, reusable filters.
+  // General questions are intentionally left to the AI with the correct dataset context.
   if (plan.intent === 'donation_query' || plan.intent === 'trophy_query') {
     const players = await getPlayers({ limit: 100 });
     const normalized = players.map(p => ({ ...p, tag: p.player_id, name: p.name }));
