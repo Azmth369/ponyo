@@ -48,13 +48,17 @@ export function buildQueryPlan(question = '') {
   const scope = detectScope(q);
   const filters = buildFilters(q);
   const asksClanIdentity = /\b(?:what(?:'s| is)\s+(?:my|our)\s+clan(?:'s)?\s+(?:name|tag|id)|(?:my|our)\s+clan\s+(?:name|tag|id)|clan\s+(?:name|tag|id)|what\s+clan\s+am\s+i\s+in)\b/.test(q);
+  const asksOpponent = /\b(?:opponent|enemy(?: clan)?|fighting|facing|against|versus|vs\.?)\b/.test(q)
+    || /\b(?:at|in)\s+(?:a\s+)?(?:clan\s+)?war\s+with\b/.test(q)
+    || /\b(?:war|wars)\s+with\s+(?:which|what|who|the)\b/.test(q)
+    || (/\bwhich\s+(?:clan|team)\b/.test(q) && /\b(?:war|fighting|battle)\b/.test(q));
   const identityField = /\b(?:tag|id)\b/.test(q) ? 'tag' : 'name';
 
   let operation = 'general';
   if (asksClanIdentity) operation = 'clan_identity';
   else if (scope === 'war' || scope === 'cwl' || scope === 'capital') {
     if (filters.unused || filters.attacks_used !== null || filters.attacks_remaining !== null) operation = 'member_attack_usage';
-    else if (/\b(?:opponent|enemy|fighting|facing|against|versus|vs\.?)\b/.test(q)) operation = 'opponent';
+    else if (asksOpponent) operation = 'opponent';
     else if (/\b(?:state|status|phase)\b/.test(q)) operation = 'state';
     else if (/\b(?:when|date|time|start|started|end|ends|ended|duration|how long)\b/.test(q)) operation = 'timing';
     else if (/\b(?:star|stars|destruction|score|percentage|percent|result)\b/.test(q)) operation = 'statistics';
