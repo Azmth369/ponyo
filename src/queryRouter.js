@@ -3,16 +3,9 @@ import {
   getCurrentWar,
   getWarMembers,
   getCwlParticipants,
-  getCwlAttacks,
-  getCapitalParticipants,
-  getCapitalAttacks
+  getCapitalParticipants
 } from './retrieval.js';
-import {
-  understandQuestion,
-  deterministicWarMembers,
-  deterministicMemberMetric,
-  deterministicRole
-} from './queryEngine.js';
+import { understandQuestion, deterministicWarMembers, deterministicMemberMetric, deterministicRole } from './queryEngine.js';
 
 const nameOnly = row => ({ name: row.player_name ?? row.name, tag: row.player_id ?? row.tag });
 
@@ -20,9 +13,7 @@ function metricRows(result) {
   return result.rows.map(p => ({ name: p.name, tag: p.tag, value: Number(p[result.plan.metric] ?? 0), metric: result.plan.metric }));
 }
 
-function roleRows(result) {
-  return result.rows.map(nameOnly);
-}
+function roleRows(result) { return result.rows.map(nameOnly); }
 
 function usageRows(rows, plan) {
   let filtered = [...rows];
@@ -35,13 +26,7 @@ function usageRows(rows, plan) {
 
 function attackUsagePlan(plan, rows) {
   const result = usageRows(rows, plan);
-  return {
-    intent: 'attack_usage',
-    scope: plan.scope,
-    filter: { unused: plan.unused, attacks_used: plan.attacks_used, attacks_remaining: plan.attacks_remaining },
-    result_count: result.length,
-    result
-  };
+  return { intent: 'structured_clan_query', scope: plan.scope, query: 'attack_usage', filter: { unused: plan.unused, attacks_used: plan.attacks_used, attacks_remaining: plan.attacks_remaining }, result_count: result.length, result };
 }
 
 export async function runDeterministicQuery(question) {
@@ -52,42 +37,29 @@ export async function runDeterministicQuery(question) {
     const normalized = players.map(p => ({ ...p, tag: p.player_id, name: p.name }));
     const result = deterministicMemberMetric(question, normalized);
     if (!result) return null;
-    const rows = metricRows(result);
-    const ordered = plan.asks_count ? rows : rows;
-    return {
-      intent: 'member_metric',
-      scope: 'clan',
-      metric: plan.metric,
-      sort: plan.sort,
-      result_count: ordered.length,
-      result: ordered
-    };
+    let rows = metricRows(result);
+    if (!plan.asks_count && plan.sort) rows = rows.slice(0, 1);
+    return { intent: 'structured_clan_query', scope: 'clan', query: plan.metric, sort: plan.sort, result_count: rows.length, result: rows };
   }
 
   if (plan.intent === 'role_query') {
     const players = await getPlayers({ limit: 100 });
     const result = deterministicRole(question, players);
     if (!result) return null;
-    return { intent: 'member_role', scope: 'clan', role: plan.role, result_count: result.rows.length, result: roleRows(result) };
+    return { intent: 'structured_clan_query', scope: 'clan', query: 'role', role: plan.role, result_count: result.rows.length, result: roleRows(result) };
   }
 
   if (plan.intent === 'war_attack_usage') {
-    const current = await getCurrentWar();
-    if (!current?.war_key) return { intent: 'attack_usage', scope: 'war', result_count: 0, result: [], note: 'No current normal clan war is available.' };
-    const members = await getWarMembers(current.war_key, 100);
-    const result = deterministicWarMembers(question, members);
-    if (!result) return null;
-    return { ...attackUsagePlan(result.plan, members), event: { war_key: current.war_key, opponent: current.opponent_clan_name, state: current.state, start_time: current.start_time, end_time: current.end_time } };
-  }
-
-  if (plan.scope === 'cwl' && plan.intent === 'war_attack_usage') {
-    const rows = await getCwlParticipants({ limit: 1000 });
-    return attackUsagePlan(plan, rows);
-  }
-
-  if (plan.scope === 'capital' && plan.intent === 'war_attack_usage') {
-    const rows = await getCapitalParticipants({ limit: 1000 });
-    return attackUsagePlan(plan, rows);
+    if (plan.scope === 'war') {
+      const current = await getCurrentWar();
+      if (!current?.war_key) return { intent: 'structured_clan_query', scope: 'war', query: 'attack_usage', result_count: 0, result: [], note: 'No current normal clan war is available.' };
+      const members = await getWarMembers(current.war_key, 100);
+      const result = deterministicWarMembers(question, members);
+      if (!result) return null;
+      return { ...attackUsagePlan(result.plan, members), event: { war_key: current.war_key, opponent: current.opponent_clan_name, state: current.state, start_time: current.start_time, end_time: current.end_time } };
+    }
+    if (plan.scope === 'cwl') return attackUsagePlan(plan, await getCwlParticipants({ limit: 1000 }));
+    if (plan.scope === 'capital') return attackUsagePlan(plan, await getCapitalParticipants({ limit: 1000 }));
   }
 
   return null;
@@ -97,5 +69,3 @@ export async function deterministicContext(question) {
   const result = await runDeterministicQuery(question);
   return result ? { deterministic: true, structured_query: result } : null;
 }
-
-export { getCwlAttacks, getCapitalAttacks };
