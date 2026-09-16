@@ -18,7 +18,10 @@ function attackCount(question) {
   const numeric = q.match(/\b([0-9]+)\s*(?:attack|attacks|times)\b/);
   if (numeric) return Number(numeric[1]);
   const word = q.match(/\b(one|two|three|four|five)\s*(?:attack|attacks|times)\b/);
-  return word ? toNumber(word[1]) : null;
+  if (word) return toNumber(word[1]);
+  const attacked = q.match(/\b(?:attacked|used|made|did)\s+(one|two|three|four|five|[0-9]+)\b/);
+  if (attacked) return toNumber(attacked[1]);
+  return null;
 }
 
 export function parseIntent(question) {
