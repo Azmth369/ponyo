@@ -15,7 +15,6 @@ export async function getPlayers(filters = {}) {
   return (data ?? []).map(p => ({ ...p, tag: p.player_id, town_hall_level: p.th, level: p.lvl, donations: p.troops_donated, donations_received: p.troops_received }));
 }
 
-// The latest preparation/inWar/warEnded CW session is the current normal war.
 export async function getCurrentWar() {
   const { data, error } = await db.from('cw_session').select('*').order('battle_start', { ascending: false }).limit(1);
   if (error) throw error;
@@ -54,6 +53,15 @@ export async function getWarAttacks(warKeyValue, maxRows = 100) {
   return (data ?? []).map(r => ({ war_key: r.cw_uid, attacker_tag: r.attacker_id, attacker_name: r.attacker_name_with_map_position, defender_tag: null, defender_name: r.defender_name_with_map_position, stars: r.star_scored, destruction_percentage: r.destruction_caused, order_no: r.index_no, attack_time: r.attacking_date_time, data: r.data }));
 }
 
+export async function getCwlParticipants(filters = {}) {
+  let q = db.from('cwl_season_participants').select('*').order('player_map_position');
+  if (filters.dayUid) q = q.eq('cwl_day_uid', filters.dayUid);
+  if (filters.playerId) q = q.eq('player_id', filters.playerId);
+  const { data, error } = await q.limit(bounded(filters.limit, 100, 1000));
+  if (error) throw error;
+  return (data ?? []).map(r => ({ day_uid: r.cwl_day_uid, player_id: r.player_id, player_name: r.player_name, map_position: r.player_map_position, attacks_available: r.attacks_available, attacks_used: r.attacks_used, stars_earned: r.stars_scored, destruction_percentage: r.destruction_caused, attack_uid: r.cwl_attack_uid, battle_start: r.battle_day_start, battle_end: r.battle_day_end, size: r.size, data: r.data }));
+}
+
 export async function getCwlAttacks(filters = {}) {
   let q = db.from('cwl_attacklog').select('*').order('attacking_date_time', { ascending: false });
   if (filters.seasonKey) q = q.eq('cwl_day_uid', filters.seasonKey);
@@ -62,6 +70,15 @@ export async function getCwlAttacks(filters = {}) {
   const { data, error } = await q;
   if (error) throw error;
   return (data ?? []).map(r => ({ season_key: r.cwl_day_uid, war_tag: r.cwl_day_uid, round_no: r.battle_day, attacker_tag: r.attacker_id, attacker_name: r.attacker_name_with_map_position, defender_tag: null, defender_name: r.defender_name_with_map_position, stars: r.star_scored, destruction_percentage: r.destruction_caused, order_no: r.index_no, attack_time: r.attacking_date_time, data: r.data }));
+}
+
+export async function getCapitalParticipants(filters = {}) {
+  let q = db.from('capital_raid_participants').select('*').order('player_name');
+  if (filters.seasonKey) q = q.eq('capital_raid_uid', filters.seasonKey);
+  if (filters.playerId) q = q.eq('player_id', filters.playerId);
+  const { data, error } = await q.limit(bounded(filters.limit, 100, 1000));
+  if (error) throw error;
+  return (data ?? []).map(r => ({ season_key: r.capital_raid_uid, player_id: r.player_id, player_name: r.player_name, attacks_available: r.attacks_available, attacks_used: r.attacks_used, attacks_remaining: Math.max(Number(r.attacks_available ?? 0) - Number(r.attacks_used ?? 0), 0), total_loot: r.total_loot_gained, attack_uid: r.capital_raid_attack_uid, raid_start: r.capital_raid_start, raid_end: r.capital_raid_end, data: r.data }));
 }
 
 export async function getCapitalAttacks(filters = {}) {
@@ -96,7 +113,6 @@ export async function getCwlRounds(seasonKey = null, maxRows = 200) {
 }
 
 export async function getCwlWars(seasonKey = null, maxRows = 100) {
-  // CWL spreadsheet design stores each league battle as a daywise record.
   let q = db.from('cwl_daywise_attacklog').select('*').order('battle_day');
   if (seasonKey) q = q.eq('generated_cwl_day_id', seasonKey);
   const { data, error } = await q.limit(bounded(maxRows, 100, 200));
