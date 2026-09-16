@@ -13,7 +13,7 @@ function numberFrom(text) {
 function detectScope(q) {
   if (/\b(?:cwl|clan war league|league day)\b/.test(q)) return 'cwl';
   if (/\b(?:capital raid|capital raids|raid weekend|capital)\b/.test(q)) return 'capital';
-  if (/\b(?:current war|clan war|clan wars|war|wars|fighting|opponent|enemy clan|versus|vs\.?|against)\b/.test(q)) return 'war';
+  if (/\b(?:current war|clan war|clan wars|war|wars|fighting|opponent|enemy clan|versus|vs\.?|against|attack|attacked|attacks)\b/.test(q)) return 'war';
   if (/\b(?:member|members|player|players|clan|donation|donations|trophies|town hall|role|elder|leader|co-leader)\b/.test(q)) return 'clan';
   return 'general';
 }
@@ -65,26 +65,15 @@ export function buildQueryPlan(question = '') {
     else if (/\b(?:member|members|player|players|how many)\b/.test(q)) operation = 'members';
   }
 
-  // Backward-compatible intent labels are only broad operation categories.
-  // They are not sentence-specific intents and should not be extended per question.
   const intent = operation === 'member_attack_usage' ? 'war_attack_usage'
     : operation === 'member_metric' ? `${filters.metric}_query`
     : operation === 'role_members' ? 'role_query'
     : 'general';
 
-  return {
-    scope,
-    operation,
-    intent,
-    identity_field: identityField,
-    ...filters,
-    normalized: q
-  };
+  return { scope, operation, intent, identity_field: identityField, ...filters, normalized: q };
 }
 
-export function understandQuestion(question = '') {
-  return buildQueryPlan(question);
-}
+export function understandQuestion(question = '') { return buildQueryPlan(question); }
 
 export function deterministicWarMembers(question, members = []) {
   const plan = buildQueryPlan(question);
@@ -117,14 +106,7 @@ export function executeIntent(question, { players = [], currentWarMembers = [] }
   const plan = buildQueryPlan(question);
   if (plan.operation === 'member_attack_usage') {
     const result = deterministicWarMembers(question, currentWarMembers);
-    return result ? {
-      intent: 'structured_clan_query',
-      scope: plan.scope,
-      query: 'attack_usage',
-      filter: { unused: plan.unused, attacks_used: plan.attacks_used, attacks_remaining: plan.attacks_remaining },
-      result_count: result.rows.length,
-      result: result.remaining
-    } : null;
+    return result ? { intent: 'structured_clan_query', scope: plan.scope, query: 'attack_usage', filter: { unused: plan.unused, attacks_used: plan.attacks_used, attacks_remaining: plan.attacks_remaining }, result_count: result.rows.length, result: result.remaining } : null;
   }
   if (plan.operation === 'member_metric') {
     const result = deterministicMemberMetric(question, players);
