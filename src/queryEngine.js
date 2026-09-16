@@ -2,7 +2,7 @@
 // The LLM presents these results; it does not decide the underlying filter/sort.
 
 const numberWords = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5 };
-const toNumber = value => numberWords[value] ?? Number(value);
+const toNumber = value => value === 'twice' ? 2 : value === 'thrice' ? 3 : (numberWords[value] ?? Number(value));
 
 function metric(question) {
   const q = question.toLowerCase();
@@ -19,8 +19,8 @@ function attackCount(question) {
   if (numeric) return Number(numeric[1]);
   const word = q.match(/\b(one|two|three|four|five)\s*(?:attack|attacks|times)\b/);
   if (word) return toNumber(word[1]);
-  const attacked = q.match(/\b(?:attacked|used|made|did)\s+(one|two|three|four|five|[0-9]+)\b/);
-  if (attacked) return toNumber(attacked[1]);
+  const natural = q.match(/\b(?:attacked|used|made|did)\s+(one|two|three|four|five|twice|thrice|[0-9]+)\b/);
+  if (natural) return toNumber(natural[1]);
   return null;
 }
 
