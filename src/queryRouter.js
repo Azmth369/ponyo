@@ -33,6 +33,20 @@ function attackUsagePlan(plan, rows) {
 export async function runDeterministicQuery(question) {
   const plan = understandQuestion(question);
 
+  if (plan.intent === 'current_war_opponent') {
+    const current = await getCurrentWar();
+    const opponent = current?.opponent_clan_name ?? null;
+    return {
+      intent: 'current_war_opponent',
+      scope: 'war',
+      query: 'current_war_opponent',
+      result_count: opponent ? 1 : 0,
+      result: opponent ? [{ name: opponent, tag: current.opponent_clan_id ?? null }] : [],
+      event: current ? { war_key: current.war_key, state: current.state, start_time: current.start_time, end_time: current.end_time } : null,
+      note: opponent ? null : 'No current normal clan war opponent is available.'
+    };
+  }
+
   if (plan.intent === 'clan_identity') {
     // Identity is authoritative from the same configured clan endpoint used by
     // the sync service. This avoids adding redundant clan_name/clan_id columns
