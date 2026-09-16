@@ -1,73 +1,68 @@
-// Deterministic intent/query layer for clan-specific questions.
-// The LLM presents these results; it does not decide the underlying filter/sort.
+const WORD_NUMBERS = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5 };
 
-const numberWords = { zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5 };
-const toNumber = value => value === 'twice' ? 2 : value === 'thrice' ? 3 : (numberWords[value] ?? Number(value));
-
-function metric(question) {
-  const q = question.toLowerCase();
-  if (/donat/.test(q)) return 'troops_donated';
-  if (/receiv/.test(q)) return 'troops_received';
-  if (/troph/.test(q)) return 'trophies';
-  if (/town hall|th\d+/.test(q)) return 'th';
-  return null;
+function normalize(text = '') {
+  return String(text).toLowerCase().replace(/[’']/g, "'").replace(/\s+/g, ' ').trim();
 }
 
-function attackCount(question) {
-  const q = question.toLowerCase();
-  const numeric = q.match(/\b([0-9]+)\s*(?:attack|attacks|times)\b/);
-  if (numeric) return Number(numeric[1]);
-  const word = q.match(/\b(one|two|three|four|five)\s*(?:attack|attacks|times)\b/);
-  if (word) return toNumber(word[1]);
-  const natural = q.match(/\b(?:attacked|used|made|did)\s+(one|two|three|four|five|twice|thrice|[0-9]+)\b/);
-  if (natural) return toNumber(natural[1]);
-  return null;
+function numberFrom(text) {
+  const digit = text.match(/\b([0-5])\b/);
+  if (digit) return Number(digit[1]);
+  return WORD_NUMBERS[text.toLowerCase()] ?? null;
 }
 
-export function parseIntent(question) {
-  const q = question.toLowerCase();
-  const currentWar = /current war|this war|war right now|ongoing war|today.?s war/.test(q);
-  const oneAttackLeft = /one.*attack.*left|left.*one.*attack|1.*attack.*left/.test(q);
-  const unused = !oneAttackLeft && /unused|haven.?t used|hasn.?t used|didn.?t use|not used|no attack|missed attack|left.*attack|attack.*left|remaining attack/.test(q);
-  const count = attackCount(question);
-  const rankingMetric = metric(question);
-  const ascending = /lowest|least|fewest|minimum|min\b|smallest|bottom/.test(q);
-  const descending = /highest|most|maximum|max\b|largest|top/.test(q);
-  const role = /\b(elder|elders|co-?leader|co-?leaders|leader|leaders|member|members)\b/.exec(q)?.[1] ?? null;
-  return { currentWar, unused, attacksUsed: count, rankingMetric, ranking: ascending || descending, direction: ascending ? 'asc' : 'desc', role, oneAttackLeft, intent: unused || count !== null || rankingMetric || role || oneAttackLeft ? 'structured_clan_query' : 'general' };
+export function understandQuestion(question = '') {
+  const q = normalize(question);
+  const scope = /\b(?:cwl|clan war league|league day)\b/.test(q) ? 'cwl'
+    : /\b(?:capital raid|capital raids|raid weekend|capital)\b/.test(q) ? 'capital'
+    : /\b(?:war|wars|clan war|current war|cw)\b/.test(q) ? 'war'
+    : /\b(?:member|members|player|players|clan|donation|donations|trophies|town hall|role|elder|leader|co-leader)\b/.test(q) ? 'clan'
+    : 'general';
+
+  const unused = /\b(?:unused|un-used|no|zero) attacks?\b/.test(q)
+    || /\b(?:hasn['’]?t|haven['’]?t|didn['’]?t|didnt) (?:use|used|make|made|do|done|attack|attacked)/.test(q)
+    || /\b(?:yet to|without) (?:use|make|do) (?:any )?attacks?\b/.test(q);
+  const usedMatch = q.match(/\b(?:used|made|did|performed|completed)\s+([0-5]|zero|one|two|three|four|five)\s+attacks?\b/) || q.match(/\b([0-5]|zero|one|two|three|four|five)\s+attacks?\b/);
+  const used = usedMatch ? numberFrom(usedMatch[1]) : null;
+  const remaining = /\b(?:one|1)\s+(?:attack|attacks?)\s+(?:left|remaining)\b/.test(q);
+  const asksLowest = /\b(?:lowest|least|minimum|min)\b/.test(q);
+  const asksHighest = /\b(?:highest|most|maximum|max)\b/.test(q);
+  const donation = /\bdonat(?:ion|ions|ed)?\b/.test(q);
+  const trophies = /\btroph(?:y|ies)\b/.test(q);
+  const role = /\b(elder|elders|leader|leaders|co-?leader|co-?leaders|member|members)\b/.exec(q)?.[1] ?? null;
+  const count = /\b(?:how many|count|number of)\b/.test(q);
+
+  let intent = 'general';
+  if (scope === 'war' && (unused || remaining || used !== null)) intent = 'war_attack_usage';
+  else if (donation && (asksLowest || asksHighest || count)) intent = 'donation_query';
+  else if (trophies && (asksLowest || asksHighest || count)) intent = 'trophy_query';
+  else if (role) intent = 'role_query';
+
+  return { scope, intent, attacks_used: used, attacks_remaining: remaining ? 1 : null, unused, sort: asksLowest ? 'asc' : asksHighest ? 'desc' : null, metric: donation ? 'troops_donated' : trophies ? 'trophies' : null, role: role ? role.replace(/-/g, '').replace(/^coleader$/, 'coLeader') : null, asks_count: count, normalized: q };
 }
 
-function roleMatches(role, requested) {
-  if (!requested) return true;
-  const raw = String(role ?? '').toLowerCase().replace(/[\s_-]/g, '');
-  const want = requested.replace(/[\s_-]/g, '');
-  if (want.startsWith('elder')) return raw === 'admin';
-  if (want.startsWith('coleader')) return raw === 'coleader';
-  return raw === want;
+export function deterministicWarMembers(question, members = []) {
+  const plan = understandQuestion(question);
+  if (plan.intent !== 'war_attack_usage') return null;
+  let rows = [...members];
+  if (plan.unused) rows = rows.filter(r => Number(r.attacks_used ?? 0) === 0);
+  if (plan.attacks_used !== null) rows = rows.filter(r => Number(r.attacks_used ?? 0) === plan.attacks_used);
+  if (plan.attacks_remaining !== null) rows = rows.filter(r => Number(r.attacks_available ?? 0) - Number(r.attacks_used ?? 0) === plan.attacks_remaining);
+  rows.sort((a, b) => Number(a.map_position ?? 99999) - Number(b.map_position ?? 99999) || String(a.player_name ?? '').localeCompare(String(b.player_name ?? '')));
+  return { plan, rows, remaining: rows.map(r => ({ name: r.player_name, attacks_used: Number(r.attacks_used ?? 0), attacks_available: Number(r.attacks_available ?? 0), attacks_remaining: Math.max(Number(r.attacks_available ?? 0) - Number(r.attacks_used ?? 0), 0), map_position: r.map_position })) };
 }
 
-export function executeIntent(question, { players = [], currentWarMembers = [] } = {}) {
-  const intent = parseIntent(question);
-  const members = currentWarMembers.map(m => ({ name: m.player_name, tag: m.player_tag, map_position: Number(m.map_position ?? 9999), attacks_used: Number(m.attacks_used ?? 0), attacks_available: Number(m.attacks_available ?? 0), attacks_remaining: Math.max(Number(m.attacks_available ?? 0) - Number(m.attacks_used ?? 0), 0), stars: Number(m.stars_earned ?? 0), destruction: Number(m.destruction_percentage ?? 0) }));
-  let result = null;
-  let source = null;
-  if (intent.currentWar && intent.oneAttackLeft) {
-    result = members.filter(m => m.attacks_remaining === 1).sort((a, b) => a.map_position - b.map_position);
-    source = 'CW_SESSION_PARTICIPANTS';
-  } else if (intent.currentWar && intent.unused) {
-    result = members.filter(m => m.attacks_remaining > 0).sort((a, b) => a.map_position - b.map_position);
-    source = 'CW_SESSION_PARTICIPANTS';
-  } else if (intent.currentWar && intent.attacksUsed !== null) {
-    result = members.filter(m => m.attacks_used === intent.attacksUsed).sort((a, b) => a.map_position - b.map_position);
-    source = 'CW_SESSION_PARTICIPANTS';
-  } else if (intent.rankingMetric) {
-    const filtered = players.filter(p => roleMatches(p.role, intent.role));
-    const field = intent.rankingMetric;
-    result = filtered.map(p => ({ name: p.name, tag: p.tag, value: Number(p[field] ?? 0) })).sort((a, b) => intent.direction === 'asc' ? a.value - b.value || a.name.localeCompare(b.name) : b.value - a.value || a.name.localeCompare(b.name));
-    source = 'CLAN_INFO';
-  } else if (intent.role) {
-    result = players.filter(p => roleMatches(p.role, intent.role)).map(p => ({ name: p.name, tag: p.tag, role: p.role }));
-    source = 'CLAN_INFO';
-  }
-  return { ...intent, source, result_count: result?.length ?? 0, result };
+export function deterministicMemberMetric(question, players = []) {
+  const plan = understandQuestion(question);
+  if (!['donation_query', 'trophy_query'].includes(plan.intent)) return null;
+  const field = plan.metric;
+  const rows = [...players].sort((a, b) => (Number(a[field] ?? 0) - Number(b[field] ?? 0)) * (plan.sort === 'desc' ? -1 : 1));
+  return { plan, rows };
+}
+
+export function deterministicRole(question, players = []) {
+  const plan = understandQuestion(question);
+  if (plan.intent !== 'role_query') return null;
+  const target = String(plan.role ?? '').toLowerCase();
+  const rows = players.filter(p => String(p.role ?? '').toLowerCase().replace(/[-_\s]/g, '') === target);
+  return { plan, rows };
 }
