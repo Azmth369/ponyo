@@ -21,7 +21,8 @@ function classify(question) {
   const q = question.toLowerCase();
   const capital = CAPITAL.test(q);
   const cwl = CWL.test(q);
-  return { member: MEMBER.test(q), war: WAR.test(q) && !capital && !cwl, capital, cwl, history: MONTHS.test(q), eventGrouping: EVENT_GROUPING.test(q) };
+  const war = WAR.test(q) && !capital && !cwl;
+  return { member: MEMBER.test(q), war, capital, cwl, history: MONTHS.test(q), eventGrouping: EVENT_GROUPING.test(q) };
 }
 
 function extractOpponent(question) { const m = question.match(/(?:against|vs\.?|versus)\s+["']?([^"'?.!,]+)["']?/i); return m?.[1]?.trim() || null; }
@@ -43,9 +44,9 @@ async function buildContext(question) {
   const kind=classify(question), context={retrieval:kind};
   const players=kind.member||kind.history?normalizePlayers(await getPlayers({limit:100})):[];
   if(players.length) context.players=players;
-  if(kind.member){
-    // Clan identity is context, not a dedicated question intent. This lets the AI
-    // answer any natural-language question about the clan without adding handlers.
+  // Clan identity is useful for clan-scoped questions, but must not compete with
+  // current-war/CWL/Capital context when the question is about an event.
+  if(kind.member && !kind.war && !kind.cwl && !kind.capital){
     const clan=await getClan();
     context.clan={name:clan.name??null,tag:clan.tag??null,members:Number(clan.members??clan.memberList?.length??players.length)};
   }
@@ -81,12 +82,12 @@ async function getWarAttacksForHistory(playerTag){if(!playerTag)return[];const w
 function formatIndiaDateTime(date) { const parts = new Intl.DateTimeFormat('en-GB', { timeZone:'Asia/Kolkata', day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:false }).formatToParts(date); const values=Object.fromEntries(parts.map(p=>[p.type,p.value])); return `${values.day}/${values.month}/${values.year} ${values.hour}:${values.minute} IST`; }
 function formatDiscordTimestamps(text) {
   let output=String(text??'');
-  output=output.replace(/(#[A-Z0-9]+:)(\d{8}T\d{6}(?:\.\d{1,3})?Z)/gi,(full,prefix,stamp)=>{const year=stamp.slice(0,4),month=stamp.slice(4,6),day=stamp.slice(6,8),hour=stamp.slice(9,11),minute=stamp.slice(11,13),second=stamp.slice(13,15),millis=stamp.match(/\.(\d{1,3})/)?.[1]??'000';const isoStamp=`${year}-${month}-${day}T${hour}:${minute}:${second}.${millis.padEnd(3,'0')}Z`;return `${prefix}${formatIndiaDateTime(new Date(isoStamp))}`;});
+  output=output.replace(/(#[A-Z0-9]+:)(\d{8}T\d{6}(?:\.\d{1,3})?Z)/gi,(full,prefix,stamp)=>{const year=stamp.slice(0,4),month=stamp.slice(4,6),day=stamp.slice(6,8),hour=stamp.slice(9,11),minute=stamp.slice(11,13),second=stamp.slice(11,13),millis=stamp.match(/\.(\d{1,3})/)?.[1]??'000';const isoStamp=`${year}-${month}-${day}T${hour}:${minute}:${second}.${millis.padEnd(3,'0')}Z`;return `${prefix}${formatIndiaDateTime(new Date(isoStamp))}`;});
   output=output.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:?\d{2})\b/g,match=>{const date=new Date(match);return Number.isNaN(date.getTime())?match:formatIndiaDateTime(date);});
   return output.replace(/\b(20\d{2})-(\d{2})-(\d{2})\b/g,(_,year,month,day)=>`${day}/${month}/${year}`);
 }
 
-const ANSWER_SCOPE=`Answer the user's exact question and nothing more. Do not dump unrelated database rows. When DATABASE CONTEXT contains structured_query with intent 'structured_clan_query', its source and result are authoritative for the underlying clan-specific filter, count, ranking, and ordering; do not recompute or change that result. For all other clan-specific questions, use the relevant scoped context (clan, current_war, cwl, capital_raids, history) and answer directly from it. Do not require a dedicated intent for a question merely because the user asks for a different field. Explain the result briefly and naturally. If result_count is zero, say no matching records were found. If the user asks for names, give names only unless more is requested. If the user asks for names and tags, give names with tags. Do not expose internal query-engine details unless asked.`;
+const ANSWER_SCOPE=`Answer the user's exact question and nothing more. Do not dump unrelated database rows. When DATABASE CONTEXT contains structured_query with intent 'structured_clan_query' or 'structured_query', its source and result are authoritative for the underlying clan-specific filter, count, ranking, ordering, or event fact; do not recompute or change that result. For all other clan-specific questions, use the relevant scoped context (clan, current_war, cwl, capital_raids, history) and answer directly from it. Do not require a dedicated intent for a question merely because the user asks for a different field. When the question is about a war/event, do not use the clan identity/name as the answer to an opponent/event question; use the relevant event context. Explain the result briefly and naturally. If result_count is zero, say no matching records were found. If the user asks for names, give names only unless more is requested. If the user asks for names and tags, give names with tags. Do not expose internal query-engine details unless asked.`;
 const CLAN_CHAT_RULES=`CLAN CHAT / CLAN MAIL REFERENCE RULES: Each individual clan-chat message must be 128 characters or fewer; a single prompt/message may tag at most 5 clan members. If drafting a clan-chat message would exceed 128 characters, rewrite it to fit. Multiple separate clan-chat messages each have their own 128-character limit. Clan Mail uses the supplied reference limit of up to 500 characters and 14-day persistence. Do not confuse these limits.`;
 const TIME_FORMAT_RULES=`DATE/TIME DISPLAY RULES: Database and CoC API timestamps are kept as source-of-truth timestamps. When presenting any date or time to the Discord user, ALWAYS convert it to India Standard Time (IST, Asia/Kolkata) and use DD/MM/YYYY for the date with 24-hour HH:mm time. Do not show raw ISO or UTC timestamps unless explicitly requested.`;
 const SYSTEM_BASE=`You are a Clash of Clans clan analyst and general Clash of Clans knowledge assistant. Use database context for clan-specific facts. For general Clash of Clans rules, mechanics, limits and terminology not in the database, use your general knowledge and reasoning. Clearly distinguish general game knowledge from clan-specific database facts. Never invent clan-specific data.\n\n${ANSWER_SCOPE}\n\n${CLAN_CHAT_RULES}\n\n${TIME_FORMAT_RULES}\n\nROLE MAPPING: raw 'leader'=Leader, 'coLeader' (case-insensitive)=Co-Leader, 'admin'=Elder, 'member'=Member. Do not interpret 'admin' as a Discord/server administrator.\n\nClan War, CWL and Capital attacks are separate datasets and must never be mixed.`;
