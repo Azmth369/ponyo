@@ -1,33 +1,15 @@
-import { getCurrentWar, getWarMembers } from './retrieval.js';
-import { deterministicWarMembers, understandQuestion } from './queryEngine.js';
+import { understandQuestion } from './queryEngine.js';
+import { answerDeterministically } from './deterministicAnswer.js';
 
 export function isUnusedCurrentWarAttackQuestion(question = '') {
   const plan = understandQuestion(question);
-  return plan.scope === 'war' && plan.intent === 'war_attack_usage' && (plan.unused || plan.attacks_remaining !== null || plan.attacks_used !== null);
+  return plan.intent === 'war_attack_usage' && (plan.unused || plan.attacks_remaining !== null || plan.attacks_used !== null);
 }
 
 export async function answerUnusedCurrentWarAttackQuestion(question = '') {
-  const plan = understandQuestion(question);
-  if (!isUnusedCurrentWarAttackQuestion(question)) return null;
-  if (plan.scope === 'cwl' || plan.scope === 'capital') return null;
-
-  const war = await getCurrentWar();
-  if (!war?.war_key) return 'There is no current Clan War available in the synced data.';
-
-  const members = await getWarMembers(war.war_key, 100);
-  const result = deterministicWarMembers(question, members);
-  if (!result) return null;
-  if (!result.rows.length) {
-    if (plan.unused) return 'All current-war participants have used at least one attack.';
-    if (plan.attacks_remaining !== null) return `No current-war participants have ${plan.attacks_remaining} attack remaining.`;
-    return `No current-war participants have used exactly ${plan.attacks_used} attacks.`;
-  }
-
-  const heading = plan.unused
-    ? 'Players who have not used any attack yet:'
-    : plan.attacks_remaining !== null
-      ? `Players with ${plan.attacks_remaining} attack remaining:`
-      : `Players who have used ${plan.attacks_used} attacks:`;
-
-  return [heading, ...result.rows.map((member, index) => `${index + 1}. ${member.player_name}`)].join('\n');
+  // Kept as the existing Discord-facing API for compatibility. It now delegates
+  // every supported deterministic query (clan metrics, roles, CW, CWL, Capital Raid)
+  // to the unified query router instead of being limited to unused CW attacks.
+  const result = await answerDeterministically(question);
+  return result?.text ?? null;
 }
