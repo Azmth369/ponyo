@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { understandQuestion, deterministicWarMembers, deterministicMemberMetric, deterministicRole } from './queryEngine.js';
+import { buildQueryPlan, understandQuestion, deterministicWarMembers, deterministicMemberMetric, deterministicRole } from './queryEngine.js';
 
 const members = [
   { player_name: 'A', attacks_used: 0, attacks_available: 2, map_position: 1 },
@@ -8,13 +8,35 @@ const members = [
   { player_name: 'C', attacks_used: 2, attacks_available: 2, map_position: 3 }
 ];
 
-test('routes normal war questions by broad scope without per-question intents', () => {
-  const opponent = understandQuestion('Which clan are we currently at war with?');
+test('routes normal war questions by broad dataset and generic operation', () => {
+  const opponent = buildQueryPlan('Which clan are we currently at war with?');
   assert.equal(opponent.scope, 'war');
+  assert.equal(opponent.operation, 'opponent');
   assert.equal(opponent.intent, 'general');
-  const state = understandQuestion('What is the current war state?');
+
+  const state = buildQueryPlan('What is the current war state?');
   assert.equal(state.scope, 'war');
+  assert.equal(state.operation, 'state');
   assert.equal(state.intent, 'general');
+});
+
+test('does not create a sentence-specific intent for different current-war questions', () => {
+  const questions = [
+    'Who are we fighting?',
+    'What is the current war status?',
+    'When does the war end?',
+    'How many members are in the war?',
+    'What is our war score?',
+    'Who has not attacked yet?'
+  ];
+  const plans = questions.map(buildQueryPlan);
+  assert.deepEqual(plans.slice(0, 5).map(p => p.scope), ['war', 'war', 'war', 'war', 'war']);
+  assert.equal(plans[0].intent, 'general');
+  assert.equal(plans[1].intent, 'general');
+  assert.equal(plans[2].intent, 'general');
+  assert.equal(plans[3].intent, 'general');
+  assert.equal(plans[4].intent, 'general');
+  assert.equal(plans[5].operation, 'member_attack_usage');
 });
 
 test('understands reusable attack filters across war types', () => {
