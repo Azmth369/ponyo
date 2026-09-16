@@ -12,14 +12,25 @@ const iso = value => {
 const uid = (...parts) => parts.map(x => String(x ?? '').replace(/[^A-Za-z0-9#:_-]/g, '_')).join(':');
 const mapLabel = (name, position) => `${name ?? 'Unknown'} [${position ?? '?'}]`;
 
+async function logSyncStatus(job, status, details = null, message = null) {
+  try {
+    await db.from('ai_chat').insert({
+      messenger: 'sync',
+      context: { job, status, ...(details == null ? {} : { details }), ...(message == null ? {} : { message }) },
+      date_time: now()
+    });
+  } catch (error) {
+    console.error(`[${job}] failed to write sync status:`, error.message);
+  }
+}
+
 export async function run(job, fn) {
-  const started = now();
   try {
     const details = await fn();
-    await db.from('ai_chat').insert({ messenger: 'sync', context: { job, status: 'ok', details }, date_time: now() }).catch(() => {});
+    await logSyncStatus(job, 'ok', details);
     return details;
   } catch (error) {
-    await db.from('ai_chat').insert({ messenger: 'sync', context: { job, status: 'error', message: error.message }, date_time: now() }).catch(() => {});
+    await logSyncStatus(job, 'error', null, error.message);
     console.error(`[${job}]`, error);
     return null;
   }
@@ -56,8 +67,6 @@ function normalWarRows(war, cwUid) {
     opponent_participants: (opponent?.members ?? []).map(m => ({ player_id: m.tag, name: m.name, map_position: m.mapPosition ?? null })),
     data: war
   };
-  // A normal Clan War always grants two attacks. Keep this value even after the war
-  // has ended so historical participant rows can still answer remaining-attack queries.
   const available = 2;
   const participants = members.map(m => {
     const attacks = m.attacks ?? [];
