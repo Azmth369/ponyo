@@ -5,6 +5,7 @@ import {
   getCwlParticipants,
   getCapitalParticipants
 } from './retrieval.js';
+import { getClan } from './cocApi.js';
 import { understandQuestion, deterministicWarMembers, deterministicMemberMetric, deterministicRole } from './queryEngine.js';
 
 const nameOnly = row => ({ name: row.player_name ?? row.name, tag: row.player_id ?? row.tag });
@@ -31,6 +32,21 @@ function attackUsagePlan(plan, rows) {
 
 export async function runDeterministicQuery(question) {
   const plan = understandQuestion(question);
+
+  if (plan.intent === 'clan_identity') {
+    // Identity is authoritative from the same configured clan endpoint used by
+    // the sync service. This avoids adding redundant clan_name/clan_id columns
+    // to every member row and keeps Supabase schema unchanged.
+    const clan = await getClan();
+    return {
+      intent: 'clan_identity',
+      scope: 'clan',
+      query: 'clan_identity',
+      field: plan.identity_field,
+      result_count: 1,
+      result: [{ name: clan.name ?? null, tag: clan.tag ?? null, members: Number(clan.members ?? clan.memberList?.length ?? 0) }]
+    };
+  }
 
   if (plan.intent === 'donation_query' || plan.intent === 'trophy_query') {
     const players = await getPlayers({ limit: 100 });
