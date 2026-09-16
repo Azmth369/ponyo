@@ -18,7 +18,13 @@ export function understandQuestion(question = '') {
     : /\b(?:member|members|player|players|clan|donation|donations|trophies|town hall|role|elder|leader|co-leader)\b/.test(q) ? 'clan'
     : 'general';
 
-  const asksClanIdentity = /\b(?:what(?:'s| is)\s+(?:my|our)\s+clan(?:'s)?\s+(?:name|tag|id)|(?:my|our)\s+clan\s+(?:name|tag|id)|clan\s+(?:name|tag|id)|what\s+clan\s+am\s+i\s+in)\b/.test(q);
+  // Current-war opponent must be checked before generic clan-identity handling.
+  // Phrases such as "which clan are we at war with" ask for the opponent, not our clan name.
+  const asksCurrentWarOpponent = scope === 'war' && /\b(?:which|what|who)\s+(?:clan|team)\b.*\b(?:at|in)\s+(?:a\s+)?(?:clan\s+)?war\b/.test(q)
+    || scope === 'war' && /\b(?:who|which\s+clan|what\s+clan)\b.*\b(?:we|our)\b.*\b(?:fighting|facing|against)\b/.test(q)
+    || scope === 'war' && /\b(?:our|current)\s+(?:war\s+)?opponent\b/.test(q);
+
+  const asksClanIdentity = !asksCurrentWarOpponent && /\b(?:what(?:'s| is)\s+(?:my|our)\s+clan(?:'s)?\s+(?:name|tag|id)|(?:my|our)\s+clan\s+(?:name|tag|id)|clan\s+(?:name|tag|id)|what\s+clan\s+am\s+i\s+in)\b/.test(q);
   const identityField = /\b(?:tag|id)\b/.test(q) ? 'tag' : 'name';
 
   const unused = /\b(?:unused|un-used|no|zero) attacks?\b/.test(q)
@@ -35,7 +41,8 @@ export function understandQuestion(question = '') {
   const count = /\b(?:how many|count|number of)\b/.test(q);
 
   let intent = 'general';
-  if (asksClanIdentity) intent = 'clan_identity';
+  if (asksCurrentWarOpponent) intent = 'current_war_opponent';
+  else if (asksClanIdentity) intent = 'clan_identity';
   else if ((scope === 'war' || scope === 'cwl' || scope === 'capital') && (unused || remaining || used !== null)) intent = 'war_attack_usage';
   else if (donation && (asksLowest || asksHighest || count)) intent = 'donation_query';
   else if (trophies && (asksLowest || asksHighest || count)) intent = 'trophy_query';
