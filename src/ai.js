@@ -5,6 +5,7 @@ import {
 } from './retrieval.js';
 import { capitalPlayerLeaderboard } from './analytics.js';
 import { compactCapitalRaidContext, compactWarAttackContext, compactCwlAttackContext } from './eventGrouping.js';
+import { executeIntent } from './queryEngine.js';
 
 const MONTHS = /january|february|march|april|may|june|july|august|september|october|november|december|month|year|trend|history|improv|declin/i;
 const WAR = /war|attack|defen|star|opponent|miss|hit|battle|participat/i;
@@ -18,14 +19,7 @@ function classify(question) {
   const q = question.toLowerCase();
   const capital = CAPITAL.test(q);
   const cwl = CWL.test(q);
-  return {
-    member: MEMBER.test(q),
-    war: WAR.test(q) && !capital && !cwl,
-    capital,
-    cwl,
-    history: MONTHS.test(q),
-    eventGrouping: EVENT_GROUPING.test(q)
-  };
+  return { member: MEMBER.test(q), war: WAR.test(q) && !capital && !cwl, capital, cwl, history: MONTHS.test(q), eventGrouping: EVENT_GROUPING.test(q) };
 }
 
 function extractOpponent(question) { const m = question.match(/(?:against|vs\.?|versus)\s+["']?([^"'?.!,]+)["']?/i); return m?.[1]?.trim() || null; }
@@ -69,55 +63,28 @@ async function buildContext(question) {
   }
   if(kind.cwl){if(kind.eventGrouping) context.cwl_event_categories=await buildCwlGrouping();else {context.cwl=await getCwlSeasons(50);context.cwl_wars=await getCwlWars(null,100);context.cwl_attacks=await getCwlAttacks({limit:500});}}
   if(kind.history){const player=extractPlayerName(question,players);if(player) context.player_snapshots=await getSnapshots(player.tag,null,500);context.historical_war_attacks=await getWarAttacksForHistory(player?.tag);context.historical_cwl_attacks=await getCwlAttacks({attackerTag:player?.tag,limit:300});context.historical_capital_attacks=await getCapitalAttacks({attackerTag:player?.tag,limit:300});}
-  if(Object.keys(context).length===1){context.players=players.length?players:normalizePlayers(await getPlayers({limit:100}));context.current_war=await getCurrentWar();}
+  // Deterministic query execution happens after retrieval. The AI only presents this result.
+  context.structured_query=executeIntent(question,{players,currentWarMembers:context.current_war_members??[]});
+  if(Object.keys(context).length===2 && !context.structured_query?.result){context.players=players.length?players:normalizePlayers(await getPlayers({limit:100}));context.current_war=await getCurrentWar();}
   return context;
 }
 
 async function getWarAttacksForHistory(playerTag){if(!playerTag)return[];const wars=await searchWars('',100);const attackSets=await Promise.all(wars.map(w=>getWarAttacks(w.war_key,500)));return attackSets.flat().filter(a=>a.attacker_tag===playerTag);}
 
-function formatIndiaDateTime(date) {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Asia/Kolkata',
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', hour12: false
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map(p => [p.type, p.value]));
-  return `${values.day}/${values.month}/${values.year} ${values.hour}:${values.minute} IST`;
-}
-
+function formatIndiaDateTime(date) { const parts = new Intl.DateTimeFormat('en-GB', { timeZone:'Asia/Kolkata', day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:false }).formatToParts(date); const values=Object.fromEntries(parts.map(p=>[p.type,p.value])); return `${values.day}/${values.month}/${values.year} ${values.hour}:${values.minute} IST`; }
 function formatDiscordTimestamps(text) {
-  let output = String(text ?? '');
-
-  // CoC API event keys can contain a timestamp, e.g. #CLANTAG:20260911T070000.000Z.
-  output = output.replace(/(#[A-Z0-9]+:)(\d{8}T\d{6}(?:\.\d{1,3})?Z)/gi, (full, prefix, stamp) => {
-    const year = stamp.slice(0, 4);
-    const month = stamp.slice(4, 6);
-    const day = stamp.slice(6, 8);
-    const hour = stamp.slice(9, 11);
-    const minute = stamp.slice(11, 13);
-    const second = stamp.slice(13, 15);
-    const millis = stamp.match(/\.(\d{1,3})/)?.[1] ?? '000';
-    const iso = `${year}-${month}-${day}T${hour}:${minute}:${second}.${millis.padEnd(3, '0')}Z`;
-    return `${prefix}${formatIndiaDateTime(new Date(iso))}`;
-  });
-
-  // ISO timestamps returned by the API/database.
-  output = output.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:?\d{2})\b/g, match => {
-    const date = new Date(match);
-    return Number.isNaN(date.getTime()) ? match : formatIndiaDateTime(date);
-  });
-
-  // Date-only values are shown in Indian DD/MM/YYYY format when they are unambiguous ISO dates.
-  output = output.replace(/\b(20\d{2})-(\d{2})-(\d{2})\b/g, (_, year, month, day) => `${day}/${month}/${year}`);
-  return output;
+  let output=String(text??'');
+  output=output.replace(/(#[A-Z0-9]+:)(\d{8}T\d{6}(?:\.\d{1,3})?Z)/gi,(full,prefix,stamp)=>{const year=stamp.slice(0,4),month=stamp.slice(4,6),day=stamp.slice(6,8),hour=stamp.slice(9,11),minute=stamp.slice(11,13),second=stamp.slice(13,15),millis=stamp.match(/\.(\d{1,3})/)?.[1]??'000';const isoStamp=`${year}-${month}-${day}T${hour}:${minute}:${second}.${millis.padEnd(3,'0')}Z`;return `${prefix}${formatIndiaDateTime(new Date(isoStamp))}`;});
+  output=output.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:?\d{2})\b/g,match=>{const date=new Date(match);return Number.isNaN(date.getTime())?match:formatIndiaDateTime(date);});
+  return output.replace(/\b(20\d{2})-(\d{2})-(\d{2})\b/g,(_,year,month,day)=>`${day}/${month}/${year}`);
 }
 
 async function generateGemini(model,key,body){const url=`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!res.ok){const message=await res.text();const error=new Error(`Gemini ${res.status}: ${message}`);error.status=res.status;throw error;}const json=await res.json();return json.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'No answer generated.';}
 
-const ANSWER_SCOPE=`Answer the user's exact question and nothing more. Do not dump the full member list, all roles, tags, or unrelated statistics unless explicitly asked. If the user asks for a count, give the count and brief explanation only. If the user asks for names, give names only. If the user asks for names and tags, give names with tags. If the user asks for a specific role, do not list other roles. If the user gives an expected number such as '7 elders', treat it as a request/constraint to verify. For current-war participant questions, return names only unless more is requested. For event categorization questions, use the deterministic event-grouping context as the authoritative mapping of records to periods/events. If a period exists but has no individual attack rows, say so instead of inventing attacks. Do not repeat large raw DATABASE CONTEXT blocks.`;
+const ANSWER_SCOPE=`Answer the user's exact question and nothing more. Do not dump unrelated database rows. When DATABASE CONTEXT contains structured_query with intent 'structured_clan_query', its source and result are authoritative for the underlying clan-specific filter, count, ranking, and ordering; do not recompute or change that result. Explain the result briefly and naturally. If result_count is zero, say no matching records were found. If the user asks for names, give names only unless more is requested. If the user asks for names and tags, give names with tags. Do not expose internal query-engine details unless asked.`;
 const CLAN_CHAT_RULES=`CLAN CHAT / CLAN MAIL REFERENCE RULES: Each individual clan-chat message must be 128 characters or fewer; a single prompt/message may tag at most 5 clan members. If drafting a clan-chat message would exceed 128 characters, rewrite it to fit. Multiple separate clan-chat messages each have their own 128-character limit. Clan Mail uses the supplied reference limit of up to 500 characters and 14-day persistence. Do not confuse these limits.`;
-const TIME_FORMAT_RULES=`DATE/TIME DISPLAY RULES: Database and CoC API timestamps are kept as source-of-truth timestamps. When presenting any date or time to the Discord user, ALWAYS convert it to India Standard Time (IST, Asia/Kolkata) and use DD/MM/YYYY for the date with 24-hour HH:mm time, e.g. 11/09/2026 12:30 IST. Do not show raw ISO timestamps, UTC timestamps, or CoC timestamp strings in the answer unless the user explicitly asks for the raw/source timestamp. If only a date is relevant, use DD/MM/YYYY. These display rules apply to war times, CWL rounds, Capital Raid periods, attack times, observed times, historical dates, and any other timestamps.`;
-const SYSTEM_BASE=`You are a Clash of Clans clan analyst and general Clash of Clans knowledge assistant. Use database context for clan-specific facts. For general Clash of Clans rules, mechanics, limits and terminology not in the database, use your general knowledge and reasoning. Clearly distinguish general game knowledge from clan-specific database facts. Never invent clan-specific data.\n\n${ANSWER_SCOPE}\n\n${CLAN_CHAT_RULES}\n\n${TIME_FORMAT_RULES}\n\nROLE MAPPING: raw 'leader'=Leader, 'coLeader'=Co-Leader, 'admin'=Elder, 'member'=Member. Do not interpret 'admin' as a Discord/server administrator.\n\nClan War, CWL and Capital attacks are separate datasets and must never be mixed. attack_time is the source timestamp only when provided; observed_at is when sync first saw the attack.`;
+const TIME_FORMAT_RULES=`DATE/TIME DISPLAY RULES: Database and CoC API timestamps are kept as source-of-truth timestamps. When presenting any date or time to the Discord user, ALWAYS convert it to India Standard Time (IST, Asia/Kolkata) and use DD/MM/YYYY for the date with 24-hour HH:mm time. Do not show raw ISO or UTC timestamps unless explicitly requested.`;
+const SYSTEM_BASE=`You are a Clash of Clans clan analyst and general Clash of Clans knowledge assistant. Use database context for clan-specific facts. For general Clash of Clans rules, mechanics, limits and terminology not in the database, use your general knowledge and reasoning. Clearly distinguish general game knowledge from clan-specific database facts. Never invent clan-specific data.\n\n${ANSWER_SCOPE}\n\n${CLAN_CHAT_RULES}\n\n${TIME_FORMAT_RULES}\n\nROLE MAPPING: raw 'leader'=Leader, 'coLeader' (case-insensitive)=Co-Leader, 'admin'=Elder, 'member'=Member. Do not interpret 'admin' as a Discord/server administrator.\n\nClan War, CWL and Capital attacks are separate datasets and must never be mixed.`;
 
 async function askGemini(question,context){const key=process.env.GEMINI_API_KEY;if(!key)throw new Error('GEMINI_API_KEY is required');const configured=process.env.GEMINI_MODEL||'gemini-3.8-flash';const supported=['gemini-3.8-flash','gemini-3.7-flash','gemini-3.5-flash-lite','gemini-3.5-flash'];const models=[supported.includes(configured)?configured:'gemini-3.8-flash',...supported].filter((m,i,a)=>a.indexOf(m)===i);const body={system_instruction:{parts:[{text:SYSTEM_BASE}]},contents:[{role:'user',parts:[{text:`${question}\n\nDATABASE CONTEXT:\n${JSON.stringify(context)}`}]}],generationConfig:{thinkingConfig:{thinkingLevel:'low'},maxOutputTokens:1200}};let last;for(const model of models){try{return formatDiscordTimestamps(await generateGemini(model,key,body));}catch(error){last=error;if([404,408,429,500,502,503,504].includes(error.status))continue;throw error;}}throw last||new Error('No Gemini model was available');}
 
