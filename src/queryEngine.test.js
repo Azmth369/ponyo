@@ -8,14 +8,20 @@ const members = [
   { player_name: 'C', attacks_used: 2, attacks_available: 2, map_position: 3 }
 ];
 
-test('understands unused current-war attacks', () => {
-  const plan = understandQuestion("Who hasn't used an attack in the current war?");
-  assert.equal(plan.scope, 'war');
-  assert.equal(plan.intent, 'war_attack_usage');
-  assert.equal(plan.unused, true);
+test('routes normal war questions by broad scope without per-question intents', () => {
+  const opponent = understandQuestion('Which clan are we currently at war with?');
+  assert.equal(opponent.scope, 'war');
+  assert.equal(opponent.intent, 'general');
+  const state = understandQuestion('What is the current war state?');
+  assert.equal(state.scope, 'war');
+  assert.equal(state.intent, 'general');
 });
 
-test('understands attacks remaining and exact attacks used', () => {
+test('understands reusable attack filters across war types', () => {
+  const unused = understandQuestion("Who hasn't used an attack in the current war?");
+  assert.equal(unused.scope, 'war');
+  assert.equal(unused.intent, 'war_attack_usage');
+  assert.equal(unused.unused, true);
   const remaining = understandQuestion('Who has one attack left?');
   assert.equal(remaining.intent, 'war_attack_usage');
   assert.equal(remaining.attacks_remaining, 1);
