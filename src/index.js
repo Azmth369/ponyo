@@ -45,7 +45,14 @@ export async function startSyncScheduler() {
           console.log(`[sync] startup ${name} disabled`);
           continue;
         }
-        await fn();
+        try {
+          const details = await fn();
+          console.log(`[sync] startup ${name} complete`, details);
+        } catch (error) {
+          // One broken data source must not prevent the other startup jobs
+          // (especially player snapshots) from running.
+          console.error(`[sync] startup ${name} failed`, error);
+        }
       }
     });
   } finally {
