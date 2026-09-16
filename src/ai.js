@@ -6,6 +6,7 @@ import {
 import { capitalPlayerLeaderboard } from './analytics.js';
 import { compactCapitalRaidContext, compactWarAttackContext, compactCwlAttackContext } from './eventGrouping.js';
 import { executeIntent } from './queryEngine.js';
+import { answerDeterministically } from './deterministicAnswer.js';
 
 const MONTHS = /january|february|march|april|may|june|july|august|september|october|november|december|month|year|trend|history|improv|declin/i;
 const WAR = /war|attack|defen|star|opponent|miss|hit|battle|participat/i;
@@ -63,7 +64,6 @@ async function buildContext(question) {
   }
   if(kind.cwl){if(kind.eventGrouping) context.cwl_event_categories=await buildCwlGrouping();else {context.cwl=await getCwlSeasons(50);context.cwl_wars=await getCwlWars(null,100);context.cwl_attacks=await getCwlAttacks({limit:500});}}
   if(kind.history){const player=extractPlayerName(question,players);if(player) context.player_snapshots=await getSnapshots(player.tag,null,500);context.historical_war_attacks=await getWarAttacksForHistory(player?.tag);context.historical_cwl_attacks=await getCwlAttacks({attackerTag:player?.tag,limit:300});context.historical_capital_attacks=await getCapitalAttacks({attackerTag:player?.tag,limit:300});}
-  // Deterministic query execution happens after retrieval. The AI only presents this result.
   context.structured_query=executeIntent(question,{players,currentWarMembers:context.current_war_members??[]});
   if(Object.keys(context).length===2 && !context.structured_query?.result){context.players=players.length?players:normalizePlayers(await getPlayers({limit:100}));context.current_war=await getCurrentWar();}
   return context;
@@ -86,9 +86,24 @@ const CLAN_CHAT_RULES=`CLAN CHAT / CLAN MAIL REFERENCE RULES: Each individual cl
 const TIME_FORMAT_RULES=`DATE/TIME DISPLAY RULES: Database and CoC API timestamps are kept as source-of-truth timestamps. When presenting any date or time to the Discord user, ALWAYS convert it to India Standard Time (IST, Asia/Kolkata) and use DD/MM/YYYY for the date with 24-hour HH:mm time. Do not show raw ISO or UTC timestamps unless explicitly requested.`;
 const SYSTEM_BASE=`You are a Clash of Clans clan analyst and general Clash of Clans knowledge assistant. Use database context for clan-specific facts. For general Clash of Clans rules, mechanics, limits and terminology not in the database, use your general knowledge and reasoning. Clearly distinguish general game knowledge from clan-specific database facts. Never invent clan-specific data.\n\n${ANSWER_SCOPE}\n\n${CLAN_CHAT_RULES}\n\n${TIME_FORMAT_RULES}\n\nROLE MAPPING: raw 'leader'=Leader, 'coLeader' (case-insensitive)=Co-Leader, 'admin'=Elder, 'member'=Member. Do not interpret 'admin' as a Discord/server administrator.\n\nClan War, CWL and Capital attacks are separate datasets and must never be mixed.`;
 
-async function askGemini(question,context){const key=process.env.GEMINI_API_KEY;if(!key)throw new Error('GEMINI_API_KEY is required');const configured=process.env.GEMINI_MODEL||'gemini-3.8-flash';const supported=['gemini-3.8-flash','gemini-3.7-flash','gemini-3.5-flash-lite','gemini-3.5-flash'];const models=[supported.includes(configured)?configured:'gemini-3.8-flash',...supported].filter((m,i,a)=>a.indexOf(m)===i);const body={system_instruction:{parts:[{text:SYSTEM_BASE}]},contents:[{role:'user',parts:[{text:`${question}\n\nDATABASE CONTEXT:\n${JSON.stringify(context)}`}]}],generationConfig:{thinkingConfig:{thinkingLevel:'low'},maxOutputTokens:1200}};let last;for(const model of models){try{return formatDiscordTimestamps(await generateGemini(model,key,body));}catch(error){last=error;if([404,408,429,500,502,503,504].includes(error.status))continue;throw error;}}throw last||new Error('No Gemini model was available');}
+async function askGemini(model,key,body){const url=`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`;const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!res.ok){const message=await res.text();const error=new Error(`Gemini ${res.status}: ${message}`);error.status=res.status;throw error;}const json=await res.json();return json.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'No answer generated.';}
 
 async function askSarvam(question,context){const key=process.env.SARVAM_API_KEY;if(!key)throw new Error('SARVAM_API_KEY is required for /ask');const configured=process.env.SARVAM_MODEL||'sarvam-105b';const model=configured==='sarvam-105b-conversations'?'sarvam-105b':configured;const body={model,messages:[{role:'system',content:SYSTEM_BASE},{role:'user',content:`${question}\n\nDATABASE CONTEXT:\n${JSON.stringify(context)}`}],temperature:0.15,reasoning_effort:null,max_tokens:800};const res=await fetch('https://api.sarvam.ai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','api-subscription-key':key},body:JSON.stringify(body)});if(!res.ok){const message=await res.text();const error=new Error(`Sarvam ${res.status}: ${message}`);error.status=res.status;error.provider='Sarvam';error.providerBody=message;error.isQuotaOrRateLimit=res.status===429||/rate.?limit|quota|token limit|limit exceeded|too many requests/i.test(message);error.isContextWindow=/context window|prompt_tokens|max_tokens|exceeds the model context|too many tokens|payload.*large|request.*large/i.test(message);throw error;}const json=await res.json();return formatDiscordTimestamps(json.choices?.[0]?.message?.content||'No answer generated.');}
 
-export async function answer(question){if(!question?.trim())throw new Error('Question cannot be empty');const clean=question.trim();return askSarvam(clean,await buildContext(clean));}
-export async function tell(question){if(!question?.trim())throw new Error('Question cannot be empty');const clean=question.trim();return askGemini(clean,await buildContext(clean));}
+async function answerWithDeterministicFirst(question, generator){
+  const deterministic = await answerDeterministically(question);
+  if (deterministic) return deterministic.text;
+  return generator();
+}
+
+export async function answer(question){
+  if(!question?.trim())throw new Error('Question cannot be empty');
+  const clean=question.trim();
+  return answerWithDeterministicFirst(clean, () => askSarvam(clean, buildContext(clean)));
+}
+
+export async function tell(question){
+  if(!question?.trim())throw new Error('Question cannot be empty');
+  const clean=question.trim();
+  return answerWithDeterministicFirst(clean, () => askGemini(clean, buildContext(clean)));
+}
