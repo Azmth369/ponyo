@@ -26,60 +26,63 @@ export async function syncCapital() {
     const seasonId = capitalSeasonUid(raid);
     const start = iso(raid.startTime);
     const end = iso(raid.endTime);
+    const members = raid.members ?? [];
 
-    // CapitalRaidSeason does not contain capital_trophies, clan, or clan capitalPoints.
-    // Keep only fields that exist in the current target schema/API mapping.
+    // Keep this row exactly aligned with supabase/schema.sql.
     await upsert('capital_raid_season', [{
       generated_uid: seasonId,
-      raid_start: start,
-      raid_end: end,
-      state: raid.state ?? null,
-      clan_name: null,
-      clan_id: clanTag ?? null,
-      total_loot: raid.capitalTotalLoot ?? null,
+      battle_start: start,
+      battle_end: end,
+      total_loot: Number(raid.capitalTotalLoot ?? 0),
+      raids_won: Number(raid.raidsCompleted ?? 0),
+      total_attacks: Number(raid.totalAttacks ?? 0),
+      participants_no: members.length,
+      absentees_no: 0,
+      participants_name: members.map(m => m.name).filter(Boolean),
+      absentees_name: [],
       data: raid
     }]);
 
-    const memberList = raid.members ?? [];
-    const participantRows = memberList.map(member => {
-      const used = Number(member.attacks ?? 0);
-      const normalLimit = Number(member.attackLimit ?? 5);
-      const bonusLimit = Number(member.bonusAttackLimit ?? 0);
-      return {
-        capital_raid_uid: seasonId,
-        player_id: member.tag,
-        player_name: member.name,
-        attacks_used: used,
-        attacks_available: normalLimit + bonusLimit,
-        capital_loot: member.capitalResourcesLooted ?? null,
-        districts_destroyed: null,
-        data: member
-      };
-    });
+    // Capital participant schema intentionally uses TOTAL ATTACKS rather than
+    // the CW/CWL ATTACKS_USED + ATTACKS_AVAILABLE pair.
+    const participantRows = members.map(member => ({
+      capital_raid_uid: seasonId,
+      player_name: member.name ?? null,
+      player_id: member.tag,
+      total_attacks: Number(member.attacks ?? 0),
+      total_loot_gained: Number(member.capitalResourcesLooted ?? 0),
+      capital_raid_attack_uid: null,
+      capital_raid_start: start,
+      capital_raid_end: end,
+      data: member
+    }));
 
     if (participantRows.length) {
       await upsert('capital_raid_participants', participantRows);
       participants += participantRows.length;
     }
 
-    // The official Capital Raid API stores attack history at raid.attackLog,
-    // not inside each member. Flatten district attacks into our attack-log schema.
+    // Official Capital Raid data stores attack history as:
+    // attackLog -> clan entry -> districts -> attacks.
     const attackRows = [];
     for (const clanEntry of raid.attackLog ?? []) {
+      const clanName = clanEntry.defender?.name ?? null;
       for (const district of clanEntry.districts ?? []) {
         for (const attack of district.attacks ?? []) {
           const attacker = attack.attacker ?? {};
+          const attackUid = uid(seasonId, attacker.tag, district.id, attackRows.length + 1);
           attackRows.push({
-            generated_uid: uid(seasonId, attacker.tag, district.id, attackRows.length + 1),
-            capital_raid_uid: seasonId,
-            player_id: attacker.tag ?? null,
-            player_name: attacker.name ?? null,
-            attack_order: null,
+            generated_uid: attackUid,
+            raid_no: null,
+            clan_name: clanName,
             district_name: district.name ?? null,
-            district_id: district.id ?? null,
-            stars: attack.stars ?? null,
-            destruction: attack.destructionPercent ?? attack.destructionPercentage ?? null,
-            attacking_date_time: null,
+            attacker_name: attacker.name ?? null,
+            star_scored: attack.stars ?? null,
+            destruction_caused: attack.destructionPercent ?? null,
+            loot_gained: null,
+            attacking_date_time: iso(attack.attackTime),
+            attacker_id: attacker.tag ?? null,
+            capital_raid_uid: seasonId,
             data: attack
           });
         }
