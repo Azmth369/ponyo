@@ -1,4 +1,5 @@
 import { runDeterministicQuery } from './queryRouter.js';
+import { formatIST } from './format.js';
 
 function metricLabel(metric) {
   if (metric === 'troops_donated') return 'troops donated';
@@ -19,8 +20,8 @@ function formatRows(rows, query) {
   if (query === 'state') return `The current war state is ${rows[0].state}.`;
   if (query === 'timing') {
     const r = rows[0];
-    const start = r.start_time ?? 'unknown';
-    const end = r.end_time ?? 'unknown';
+    const start = r.start_time ? formatIST(r.start_time) : 'unknown';
+    const end = r.end_time ? formatIST(r.end_time) : 'unknown';
     return `War start: ${start}\nWar end: ${end}\nState: ${r.state}.`;
   }
   if (query === 'members') return rows.map(r => `${r.name}${r.tag ? ` (${r.tag})` : ''} — ${r.attacks_used}/${r.attacks_available} attacks used`).join('\n');

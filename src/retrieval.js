@@ -16,14 +16,29 @@ export async function getPlayers(filters = {}) {
 }
 
 export async function getCurrentWar() {
-  const { data, error } = await db.from('cw_session').select('*').order('battle_start', { ascending: false }).limit(1);
+  const { data, error } = await db.from('cw_session').select('*').order('battle_start', { ascending: false, nullsFirst: false }).limit(10);
   if (error) throw error;
-  const row = data?.[0];
-  if (!row) return null;
-  const end = row.battle_end ? new Date(row.battle_end) : null;
-  const now = new Date();
-  const state = end && now > end ? 'warEnded' : (row.battle_start && now >= new Date(row.battle_start) ? 'inWar' : 'preparation');
-  return { war_key: row.cw_uid, state, start_time: row.battle_start, end_time: row.battle_end, data: row.data, opponent_clan_name: row.opponent_clan_name, opponent_clan_id: row.opponent_clan_id };
+  const now = Date.now();
+  for (const row of data ?? []) {
+    // A session is "current" while its battle window has not fully passed.
+    // Ended wars are history and must not be reported as the current war.
+    const endMs = row.battle_end ? new Date(row.battle_end).getTime() : null;
+    if (endMs == null || endMs >= now) {
+      const startMs = row.battle_start ? new Date(row.battle_start).getTime() : null;
+      const state = startMs != null && now < startMs ? 'preparation' : 'inWar';
+      return {
+        war_key: row.cw_uid,
+        state,
+        start_time: row.battle_start,
+        end_time: row.battle_end,
+        data: row.data,
+        opponent_clan_name: row.opponent_clan_name,
+        opponent_clan_id: row.opponent_clan_id,
+        size: row.size
+      };
+    }
+  }
+  return null;
 }
 
 export async function searchWars(term = '', maxRows = 25) {

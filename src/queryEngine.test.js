@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildQueryPlan, understandQuestion, deterministicWarMembers, deterministicMemberMetric, deterministicRole } from './queryEngine.js';
+import { buildQueryPlan, understandQuestion, deterministicWarMembers, deterministicMemberMetric, deterministicRole, applyAttackUsageFilters } from './queryEngine.js';
 
 const members = [
-  { player_name: 'A', attacks_used: 0, attacks_available: 2, map_position: 1 },
-  { player_name: 'B', attacks_used: 1, attacks_available: 2, map_position: 2 },
-  { player_name: 'C', attacks_used: 2, attacks_available: 2, map_position: 3 }
+  { player_name: 'A', player_id: '#PA', attacks_used: 0, attacks_available: 2, map_position: 1 },
+  { player_name: 'B', player_id: '#PB', attacks_used: 1, attacks_available: 2, map_position: 2 },
+  { player_name: 'C', player_id: '#PC', attacks_used: 2, attacks_available: 2, map_position: 3 }
 ];
 
 test('routes normal war questions by broad dataset and generic operation', () => {
@@ -52,6 +52,7 @@ test('understands reusable attack filters across war types', () => {
   const remaining = understandQuestion('Who has one attack left?');
   assert.equal(remaining.intent, 'war_attack_usage');
   assert.equal(remaining.attacks_remaining, 1);
+  assert.equal(remaining.attacks_used, null);
   const exact = understandQuestion('Who attacked twice?');
   assert.equal(exact.intent, 'war_attack_usage');
   assert.equal(exact.attacks_used, 2);
@@ -61,9 +62,11 @@ test('understands CWL and Capital Raid attack usage', () => {
   const cwl = understandQuestion('Who has one attack left in CWL?');
   assert.equal(cwl.scope, 'cwl');
   assert.equal(cwl.intent, 'war_attack_usage');
+  assert.equal(cwl.attacks_remaining, 1);
   const capital = understandQuestion('Who has not attacked in the Capital Raid?');
   assert.equal(capital.scope, 'capital');
   assert.equal(capital.intent, 'war_attack_usage');
+  assert.equal(capital.unused, true);
 });
 
 test('filters deterministically and orders by map position', () => {
@@ -71,6 +74,8 @@ test('filters deterministically and orders by map position', () => {
   assert.deepEqual(result.rows.map(r => r.player_name), ['B']);
   const zero = deterministicWarMembers("Who hasn't used an attack?", members);
   assert.deepEqual(zero.rows.map(r => r.player_name), ['A']);
+  const explicit = deterministicWarMembers('Who has not attacked yet?', members);
+  assert.deepEqual(explicit.rows.map(r => r.player_name), ['A']);
 });
 
 test('finds lowest donation member', () => {
@@ -89,4 +94,22 @@ test('filters Elder role using the Clash of Clans role value', () => {
   ];
   const result = deterministicRole('who are the elders?', players);
   assert.deepEqual(result.rows.map(p => p.name), ['A']);
+});
+
+test('applyAttackUsageFilters is shared logic: unused, exact and remaining', () => {
+  const plan = buildQueryPlan('who did not attack');
+  assert.deepEqual(applyAttackUsageFilters(members, plan).map(r => r.player_name), ['A']);
+  const exactPlan = buildQueryPlan('who used one attack');
+  assert.deepEqual(applyAttackUsageFilters(members, exactPlan).map(r => r.player_name), ['B']);
+  const remPlan = buildQueryPlan('who has two attacks remaining');
+  assert.deepEqual(applyAttackUsageFilters(members, remPlan).map(r => r.player_name), ['A']);
+});
+
+test('clan identity and member metric questions', () => {
+  const identity = buildQueryPlan("what is our clan's tag");
+  assert.equal(identity.operation, 'clan_identity');
+  assert.equal(identity.identity_field, 'tag');
+  const count = buildQueryPlan('how many members are in the clan');
+  assert.equal(count.scope, 'clan');
+  assert.equal(count.operation, 'members');
 });

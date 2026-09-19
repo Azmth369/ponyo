@@ -1,3 +1,8 @@
+// Database-backed deterministic query router. Turns a query plan into real
+// rows from the Ponyo schema and returns a structured result. Filtering is
+// delegated to queryEngine.applyAttackUsageFilters so the pure intent executor
+// and this router can never disagree.
+
 import {
   getPlayers,
   getCurrentWar,
@@ -6,28 +11,40 @@ import {
   getCapitalParticipants
 } from './retrieval.js';
 import { getClan } from './cocApi.js';
-import { buildQueryPlan, deterministicWarMembers, deterministicMemberMetric, deterministicRole } from './queryEngine.js';
-
-const nameOnly = row => ({ name: row.player_name ?? row.name, tag: row.player_id ?? row.tag });
+import {
+  buildQueryPlan,
+  deterministicWarMembers,
+  deterministicMemberMetric,
+  deterministicRole,
+  applyAttackUsageFilters
+} from './queryEngine.js';
 
 function metricRows(result) {
   return result.rows.map(p => ({ name: p.name, tag: p.tag, value: Number(p[result.plan.metric] ?? 0), metric: result.plan.metric }));
 }
 
-function roleRows(result) { return result.rows.map(nameOnly); }
+const nameOnly = row => ({ name: row.player_name ?? row.name, tag: row.player_id ?? row.tag });
+const roleRows = result => result.rows.map(nameOnly);
 
-function usageRows(rows, plan) {
-  let filtered = [...rows];
-  if (plan.unused) filtered = filtered.filter(r => Number(r.attacks_used ?? 0) === 0);
-  if (plan.attacks_used !== null) filtered = filtered.filter(r => Number(r.attacks_used ?? 0) === plan.attacks_used);
-  if (plan.attacks_remaining !== null) filtered = filtered.filter(r => Number(r.attacks_available ?? 0) - Number(r.attacks_used ?? 0) === plan.attacks_remaining);
-  filtered.sort((a, b) => Number(a.map_position ?? 99999) - Number(b.map_position ?? 99999) || String(a.player_name ?? '').localeCompare(String(b.player_name ?? '')));
-  return filtered.map(r => ({ name: r.player_name, tag: r.player_id, map_position: r.map_position, attacks_used: Number(r.attacks_used ?? 0), attacks_available: Number(r.attacks_available ?? 0), attacks_remaining: Math.max(Number(r.attacks_available ?? 0) - Number(r.attacks_used ?? 0), 0), stars_earned: Number(r.stars_earned ?? 0), destruction_percentage: Number(r.destruction_percentage ?? 0) }));
-}
-
-function attackUsagePlan(plan, rows) {
-  const result = usageRows(rows, plan);
-  return { intent: 'structured_clan_query', scope: plan.scope, query: 'attack_usage', filter: { unused: plan.unused, attacks_used: plan.attacks_used, attacks_remaining: plan.attacks_remaining }, result_count: result.length, result };
+function attackUsageResult(plan, rows) {
+  const filtered = applyAttackUsageFilters(rows, plan);
+  return {
+    intent: 'structured_clan_query',
+    scope: plan.scope,
+    query: 'attack_usage',
+    filter: { unused: plan.unused, attacks_used: plan.attacks_used, attacks_remaining: plan.attacks_remaining },
+    result_count: filtered.length,
+    result: filtered.map(r => ({
+      name: r.player_name,
+      tag: r.player_id,
+      map_position: r.map_position,
+      attacks_used: Number(r.attacks_used ?? 0),
+      attacks_available: Number(r.attacks_available ?? 0),
+      attacks_remaining: Math.max(Number(r.attacks_available ?? 0) - Number(r.attacks_used ?? 0), 0),
+      stars_earned: Number(r.stars_earned ?? 0),
+      destruction_percentage: Number(r.destruction_percentage ?? 0)
+    }))
+  };
 }
 
 function currentWarStatistics(members) {
@@ -55,7 +72,11 @@ export async function runDeterministicQuery(question) {
 
   if (plan.operation === 'clan_identity') {
     const clan = await getClan();
-    return { intent: 'structured_query', scope: 'clan', query: 'clan_identity', field: plan.identity_field, result_count: 1, result: [{ name: clan.name ?? null, tag: clan.tag ?? null, members: Number(clan.members ?? clan.memberList?.length ?? 0) }] };
+    return {
+      intent: 'structured_query', scope: 'clan', query: 'clan_identity', field: plan.identity_field,
+      result_count: 1,
+      result: [{ name: clan.name ?? null, tag: clan.tag ?? null, members: Number(clan.members ?? clan.memberList?.length ?? 0) }]
+    };
   }
 
   if (plan.operation === 'member_metric') {
@@ -81,41 +102,74 @@ export async function runDeterministicQuery(question) {
 
     if (plan.operation === 'opponent') {
       const opponent = opponentFromCurrentWar(current);
-      return { intent: 'structured_query', scope: 'war', query: 'opponent', result_count: opponent.name || opponent.tag ? 1 : 0, result: [opponent], event: { war_key: current.war_key, state: current.state } };
+      return {
+        intent: 'structured_query', scope: 'war', query: 'opponent',
+        result_count: opponent.name || opponent.tag ? 1 : 0,
+        result: [opponent],
+        event: { war_key: current.war_key, state: current.state }
+      };
     }
 
     if (plan.operation === 'state') {
-      return { intent: 'structured_query', scope: 'war', query: 'state', result_count: 1, result: [{ state: current.state }], event: { war_key: current.war_key, state: current.state } };
+      return {
+        intent: 'structured_query', scope: 'war', query: 'state', result_count: 1,
+        result: [{ state: current.state }],
+        event: { war_key: current.war_key, state: current.state }
+      };
     }
 
     const members = await getWarMembers(current.war_key, 100);
 
     if (plan.operation === 'timing') {
-      return { intent: 'structured_query', scope: 'war', query: 'timing', result_count: 1, result: [{ start_time: current.start_time, end_time: current.end_time, state: current.state }], event: { war_key: current.war_key, state: current.state } };
+      return {
+        intent: 'structured_query', scope: 'war', query: 'timing', result_count: 1,
+        result: [{ start_time: current.start_time, end_time: current.end_time, state: current.state }],
+        event: { war_key: current.war_key, state: current.state }
+      };
     }
 
     if (plan.operation === 'members') {
-      return { intent: 'structured_query', scope: 'war', query: 'members', result_count: members.length, result: members.map(r => ({ name: r.player_name, tag: r.player_tag, map_position: r.map_position, attacks_used: Number(r.attacks_used ?? 0), attacks_available: Number(r.attacks_available ?? 0), stars_earned: Number(r.stars_earned ?? 0), destruction_percentage: Number(r.destruction_percentage ?? 0) })), event: { war_key: current.war_key, opponent: current.opponent_clan_name, state: current.state } };
+      return {
+        intent: 'structured_query', scope: 'war', query: 'members', result_count: members.length,
+        result: members.map(r => ({
+          name: r.player_name, tag: r.player_tag, map_position: r.map_position,
+          attacks_used: Number(r.attacks_used ?? 0), attacks_available: Number(r.attacks_available ?? 0),
+          stars_earned: Number(r.stars_earned ?? 0), destruction_percentage: Number(r.destruction_percentage ?? 0)
+        })),
+        event: { war_key: current.war_key, opponent: current.opponent_clan_name, state: current.state }
+      };
     }
 
     if (plan.operation === 'statistics') {
-      return { intent: 'structured_query', scope: 'war', query: 'statistics', result_count: 1, result: [currentWarStatistics(members)], event: { war_key: current.war_key, opponent: current.opponent_clan_name, state: current.state } };
+      return {
+        intent: 'structured_query', scope: 'war', query: 'statistics', result_count: 1,
+        result: [currentWarStatistics(members)],
+        event: { war_key: current.war_key, opponent: current.opponent_clan_name, state: current.state }
+      };
     }
 
     if (plan.operation === 'member_attack_usage') {
       const result = deterministicWarMembers(question, members);
       if (!result) return null;
-      return { ...attackUsagePlan(result.plan, members), intent: 'structured_query', event: { war_key: current.war_key, opponent: current.opponent_clan_name, state: current.state, start_time: current.start_time, end_time: current.end_time } };
+      return {
+        ...attackUsageResult(result.plan, members),
+        event: {
+          war_key: current.war_key,
+          opponent: current.opponent_clan_name,
+          state: current.state,
+          start_time: current.start_time,
+          end_time: current.end_time
+        }
+      };
     }
   }
 
-  if (plan.scope === 'cwl' && plan.operation === 'member_attack_usage') return { ...attackUsagePlan(plan, await getCwlParticipants({ limit: 1000 })), intent: 'structured_query' };
-  if (plan.scope === 'capital' && plan.operation === 'member_attack_usage') return { ...attackUsagePlan(plan, await getCapitalParticipants({ limit: 1000 })), intent: 'structured_query' };
+  if (plan.scope === 'cwl' && plan.operation === 'member_attack_usage') {
+    return attackUsageResult(plan, await getCwlParticipants({ limit: 1000 }));
+  }
+  if (plan.scope === 'capital' && plan.operation === 'member_attack_usage') {
+    return attackUsageResult(plan, await getCapitalParticipants({ limit: 1000 }));
+  }
 
   return null;
-}
-
-export async function deterministicContext(question) {
-  const result = await runDeterministicQuery(question);
-  return result ? { deterministic: true, structured_query: result } : null;
 }
