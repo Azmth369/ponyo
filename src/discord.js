@@ -325,10 +325,11 @@ async function handleAiCommand(interaction, provider, generator) {
 
     const contextualQuestion = buildContextualQuestion(question, turns);
     // Every answer flows through ai.js: the structured (Supabase + live CoC)
-    // result is built as authoritative context and the provider applies the
-    // final judgement. Provider failures fall back to the structured text
-    // inside ai.js, so no deterministic shortcut is taken here.
-    const result = await generator(contextualQuestion);
+    // result is built from the CURRENT question only (so conversation
+    // history mentioning other datasets cannot hijack the scope), while the
+    // contextual question with history goes to the provider for follow-up
+    // resolution. Provider failures fall back to structured text in ai.js.
+    const result = await generator(question, contextualQuestion);
     const elapsed = ((Date.now() - started) / 1000).toFixed(1);
 
     try {
