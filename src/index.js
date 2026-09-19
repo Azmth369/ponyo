@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { syncClan, syncWar, syncHistory, syncCwl, run } from './sync.js';
 import { syncCapital } from './capitalSync.js';
+import { migrateLegacyUids } from './migrateUids.js';
 
 const bool = (name, fallback = true) => {
   const value = process.env[name];
@@ -39,6 +40,15 @@ export async function startSyncScheduler() {
   if (syncRunning) return;
   syncRunning = true;
   try {
+    // Convert legacy timestamp-based UIDs to the CW/CWL/CR scheme once,
+    // before any sync job can write new rows.
+    try {
+      const migrated = await migrateLegacyUids();
+      if (migrated) console.log('[sync] legacy UID migration complete', migrated);
+    } catch (error) {
+      console.error('[sync] legacy UID migration failed; continuing with existing UIDs', error);
+    }
+
     await run('startup', async () => {
       for (const [name, enabled, fn] of startupJobs) {
         if (!enabled) {
