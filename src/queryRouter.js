@@ -96,7 +96,8 @@ export async function runDeterministicQuery(question) {
 
   if (plan.operation === 'clan_identity') {
     const clan = await getClan();
-    return { intent: 'structured_query', scope: 'clan', query: 'clan_identity', field: plan.identity_field,
+    return {
+      intent: 'structured_query', scope: 'clan', query: 'clan_identity', field: plan.identity_field,
       result_count: 1,
       result: [{ name: clan.name ?? null, tag: clan.tag ?? null, members: Number(clan.members ?? clan.memberList?.length ?? 0) }]
     };
