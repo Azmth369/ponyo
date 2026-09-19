@@ -116,9 +116,11 @@ export async function getLatestCwlDay() {
 
 export async function getLatestCapitalSeason() {
   // Latest synced capital raid season (the ongoing weekend while it runs,
-  // otherwise the most recent one).
+  // otherwise the most recent one). Also returns the participant/absentee
+  // name lists: the CoC API only lists members who already attacked, so
+  // "who has not attacked" can only be answered from the absentees.
   const { data, error } = await db.from('capital_raid_season')
-    .select('generated_uid,battle_start,battle_end,total_loot,raids_won,total_attacks')
+    .select('generated_uid,battle_start,battle_end,total_loot,raids_won,total_attacks,participants_name,absentees_name,participants_no,absentees_no')
     .order('battle_start', { ascending: false, nullsFirst: false })
     .limit(1);
   if (error) throw error;
@@ -135,7 +137,11 @@ export async function getLatestCapitalSeason() {
     state,
     total_loot: r.total_loot,
     raids_completed: r.raids_won,
-    total_attacks: r.total_attacks
+    total_attacks: r.total_attacks,
+    participants_no: r.participants_no,
+    absentees_no: r.absentees_no,
+    participants: Array.isArray(r.participants_name) ? r.participants_name : [],
+    absentees: Array.isArray(r.absentees_name) ? r.absentees_name : []
   };
 }
 
