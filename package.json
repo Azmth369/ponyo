@@ -1,6 +1,6 @@
 {
   "name": "coc-discord-bot",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "Ponyo Clash of Clans data sync + read-only AI Discord bot",
   "type": "module",
@@ -8,10 +8,12 @@
     "start": "node src/runtime.js",
     "sync": "node src/index.js",
     "sync:once": "node src/sync.js",
-    "test": "node --test src/queryEngine.test.js",
+    "test": "node --test src/queryEngine.test.js src/uids.test.js src/sync.test.js",
     "import:legacy": "node src/importLegacyAttackLog.js"
   },
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",
     "discord.js": "^14.24.2",
