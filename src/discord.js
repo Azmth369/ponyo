@@ -10,7 +10,6 @@ import {
   SlashCommandBuilder
 } from 'discord.js';
 import { answer, tell } from './ai.js';
-import { answerUnusedCurrentWarAttackQuestion } from './warQueries.js';
 import {
   attachAiAnswerMessage,
   cleanupAiState,
@@ -325,14 +324,11 @@ async function handleAiCommand(interaction, provider, generator) {
     }
 
     const contextualQuestion = buildContextualQuestion(question, turns);
-    let result;
-    try {
-      result = await answerUnusedCurrentWarAttackQuestion(question);
-    } catch (deterministicError) {
-      console.error('[discord] deterministic current-war query failed; falling back to AI', deterministicError);
-      result = null;
-    }
-    if (result == null) result = await generator(contextualQuestion);
+    // Every answer flows through ai.js: the structured (Supabase + live CoC)
+    // result is built as authoritative context and the provider applies the
+    // final judgement. Provider failures fall back to the structured text
+    // inside ai.js, so no deterministic shortcut is taken here.
+    const result = await generator(contextualQuestion);
     const elapsed = ((Date.now() - started) / 1000).toFixed(1);
 
     try {
