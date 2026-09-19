@@ -59,7 +59,10 @@ export async function getSnapshots(playerTag, since = null, maxRows = 200) {
 export async function getWarMembers(warKeyValue, maxRows = 100) {
   const { data, error } = await db.from('cw_session_participants').select('*').eq('cw_uid', warKeyValue).order('player_map_position').limit(bounded(maxRows, 100, 100));
   if (error) throw error;
-  return (data ?? []).map(r => ({ war_key: r.cw_uid, player_tag: r.player_id, player_name: r.player_name, map_position: r.player_map_position, attacks_available: r.attacks_available, attacks_used: r.attacks_used, stars_earned: r.stars_scored, destruction_percentage: r.destruction_caused, data: r.data }));
+  // Defensive dedupe: keep the newest row per player if legacy duplicates exist.
+  const byPlayer = new Map();
+  for (const r of data ?? []) byPlayer.set(r.player_id, r);
+  return [...byPlayer.values()].map(r => ({ war_key: r.cw_uid, player_tag: r.player_id, player_name: r.player_name, map_position: r.player_map_position, attacks_available: r.attacks_available, attacks_used: r.attacks_used, stars_earned: r.stars_scored, destruction_percentage: r.destruction_caused, data: r.data }));
 }
 
 export async function getWarAttacks(warKeyValue, maxRows = 100) {
@@ -74,7 +77,10 @@ export async function getCwlParticipants(filters = {}) {
   if (filters.playerId) q = q.eq('player_id', filters.playerId);
   const { data, error } = await q.limit(bounded(filters.limit, 100, 1000));
   if (error) throw error;
-  return (data ?? []).map(r => ({ day_uid: r.cwl_day_uid, player_id: r.player_id, player_name: r.player_name, map_position: r.player_map_position, attacks_available: r.attacks_available, attacks_used: r.attacks_used, stars_earned: r.stars_scored, destruction_percentage: r.destruction_caused, attack_uid: r.cwl_attack_uid, battle_start: r.battle_day_start, battle_end: r.battle_day_end, size: r.size, data: r.data }));
+  // Defensive dedupe: keep the newest row per player if legacy duplicates exist.
+  const byPlayer = new Map();
+  for (const r of data ?? []) byPlayer.set(r.player_id, r);
+  return [...byPlayer.values()].map(r => ({ day_uid: r.cwl_day_uid, player_id: r.player_id, player_name: r.player_name, map_position: r.player_map_position, attacks_available: r.attacks_available, attacks_used: r.attacks_used, stars_earned: r.stars_scored, destruction_percentage: r.destruction_caused, attack_uid: r.cwl_attack_uid, battle_start: r.battle_day_start, battle_end: r.battle_day_end, size: r.size, data: r.data }));
 }
 
 export async function getCwlAttacks(filters = {}) {
@@ -139,7 +145,10 @@ export async function getCapitalParticipants(filters = {}) {
   if (filters.playerId) q = q.eq('player_id', filters.playerId);
   const { data, error } = await q.limit(bounded(filters.limit, 100, 1000));
   if (error) throw error;
-  return (data ?? []).map(r => ({ season_key: r.capital_raid_uid, player_id: r.player_id, player_name: r.player_name, attacks_available: r.attacks_available, attacks_used: r.attacks_used, attacks_remaining: Math.max(Number(r.attacks_available ?? 0) - Number(r.attacks_used ?? 0), 0), total_loot: r.total_loot_gained, attack_uid: r.capital_raid_attack_uid, raid_start: r.capital_raid_start, raid_end: r.capital_raid_end, data: r.data }));
+  // Defensive dedupe: keep the newest row per player if legacy duplicates exist.
+  const byPlayer = new Map();
+  for (const r of data ?? []) byPlayer.set(r.player_id, r);
+  return [...byPlayer.values()].map(r => ({ season_key: r.capital_raid_uid, player_id: r.player_id, player_name: r.player_name, attacks_available: r.attacks_available, attacks_used: r.attacks_used, attacks_remaining: Math.max(Number(r.attacks_available ?? 0) - Number(r.attacks_used ?? 0), 0), total_loot: r.total_loot_gained, attack_uid: r.capital_raid_attack_uid, raid_start: r.capital_raid_start, raid_end: r.capital_raid_end, data: r.data }));
 }
 
 export async function getCapitalAttacks(filters = {}) {
