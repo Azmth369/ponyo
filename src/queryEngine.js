@@ -35,14 +35,14 @@ function buildFilters(q) {
   // "one attack left/remaining" must be captured with a group, and it must be
   // resolved BEFORE the "used" patterns so "one attack left" is not misread
   // as "used one attack".
-  const remainingMatch = q.match(new RegExp(`\b(${NUMBER_WORD})\s+attacks?\s+(?:left|remaining)\b`));
+  const remainingMatch = q.match(new RegExp(`\\b(${NUMBER_WORD})\\s+attacks?\\s+(?:left|remaining)\\b`));
   const remaining = remainingMatch ? numberFrom(remainingMatch[1]) : null;
 
   const usedMatch = remaining !== null ? null : (
-    q.match(new RegExp(`\b(?:used|made|did|performed|completed)\s+(${NUMBER_WORD})\s+attacks?\b`)) ||
-    q.match(new RegExp(`\b(?:attacked?|used|made|did)\s+(${NUMBER_WORD})\s+times?\b`)) ||
+    q.match(new RegExp(`\\b(?:used|made|did|performed|completed)\\s+(${NUMBER_WORD})\\s+attacks?\\b`)) ||
+    q.match(new RegExp(`\\b(?:attacked?|used|made|did)\\s+(${NUMBER_WORD})\\s+times?\\b`)) ||
     q.match(/\b(?:attacked?|used|made|did)\s+(twice|thrice)\b/) ||
-    q.match(new RegExp(`\b(${NUMBER_WORD})\s+attacks?\b`))
+    q.match(new RegExp(`\\b(${NUMBER_WORD})\\s+attacks?\\b`))
   );
   const used = usedMatch ? numberFrom(usedMatch[1]) : null;
 
@@ -67,7 +67,7 @@ function buildFilters(q) {
     attacks_used: used,
     attacks_remaining: remaining,
     sort: asksLowest ? 'asc' : asksHighest ? 'desc' : null,
-    metric: donation ? 'troops_donated' : trophies ? 'trophies' : null,
+    metric: donation ? 'troops_donated' : trophies ? 'tropies' : null,
     role: role ? role.replace(/-/g, '').replace(/^coleader$/, 'coLeader') : null,
     asks_count: count
   };
@@ -186,7 +186,7 @@ export function executeIntent(question, { players = [], currentWarMembers = [] }
     if (!result) return null;
     return {
       intent: 'structured_clan_query',
-      scope: 'clan',
+        scope: 'clan',
       query: plan.metric,
       sort: plan.sort,
       result_count: result.rows.length,
@@ -198,7 +198,7 @@ export function executeIntent(question, { players = [], currentWarMembers = [] }
     if (!result) return null;
     return {
       intent: 'structured_clan_query',
-      scope: 'clan',
+        scope: 'clan',
       query: 'role',
       role: plan.role,
       result_count: result.rows.length,

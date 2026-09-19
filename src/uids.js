@@ -3,8 +3,8 @@
 //   Normal Clan War: CW001           session
 //                    CW001-ATK001    attack
 //   CWL:             CWL001          season
-//                    CWL001-D1       league day
-//                    CWL001-D1-ATK01 attack
+//                     CWL001-D1       league day
+//                      CWL001-D1-ATK01 attack
 //   Capital Raid:    CR001           season
 //                    CR001-R1        raid against one opponent
 //                    CR001-R1-ATK001 attack
@@ -12,7 +12,7 @@
 // The pure helpers below have no side effects so they can be unit-tested.
 // The database-backed allocator lives in uidAlloc.js.
 
-const seqPattern = prefix => new RegExp(`^${prefix}(\d+)$`);
+const seqPattern = prefix => new RegExp(`^${prefix}(\\d+)$`);
 
 export function parseSeq(uid, prefix) {
   const match = String(uid ?? '').match(seqPattern(prefix));
