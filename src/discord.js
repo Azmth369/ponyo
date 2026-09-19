@@ -17,6 +17,7 @@ import {
   createAiAnswer,
   getAiAnswer,
   getConversationTurns,
+  logAiChat,
   saveConversationTurn
 } from './aiState.js';
 
@@ -333,6 +334,17 @@ async function handleAiCommand(interaction, provider, generator) {
     }
     if (result == null) result = await generator(contextualQuestion);
     const elapsed = ((Date.now() - started) / 1000).toFixed(1);
+
+    try {
+      await logAiChat({
+        messenger: interaction.user.username,
+        provider,
+        question,
+        answer: result
+      });
+    } catch (chatLogError) {
+      console.error('[discord] failed to write ai_chat log', chatLogError);
+    }
 
     try {
       await saveConversationTurn({

@@ -77,6 +77,19 @@ export async function getConversationTurns({ guildId, channelId, userId, limit =
   return [...(data ?? [])].reverse();
 }
 
+// AI Q&A log, matching the ai_chat table design in database/AI_CHAT.xlsx.
+export async function logAiChat({ messenger, provider, question, answer }) {
+  const { error } = await db.from('ai_chat').insert({
+    messenger: String(messenger || 'unknown').slice(0, 100),
+    context: {
+      provider,
+      question: String(question || '').slice(0, 1000),
+      answer: String(answer || '').slice(0, 4000)
+    }
+  });
+  if (error) throw error;
+}
+
 export async function cleanupAiState() {
   const now = new Date().toISOString();
   const [answers, conversations] = await Promise.all([
