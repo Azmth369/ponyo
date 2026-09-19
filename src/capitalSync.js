@@ -111,6 +111,11 @@ export async function syncCapital() {
       data: member
     }));
 
+    // Participants are delete+inserted per season (like the attack rows) so
+    // re-syncs can never accumulate duplicate players, even on databases
+    // where the unique constraint is missing.
+    const removedParticipants = await db.from('capital_raid_participants').delete().eq('capital_raid_uid', seasonId);
+    if (removedParticipants.error) throw removedParticipants.error;
     if (participantRows.length) {
       await upsert('capital_raid_participants', participantRows);
       participants += participantRows.length;
