@@ -67,7 +67,7 @@ function buildFilters(q) {
     attacks_used: used,
     attacks_remaining: remaining,
     sort: asksLowest ? 'asc' : asksHighest ? 'desc' : null,
-    metric: donation ? 'troops_donated' : trophies ? 'tropies' : null,
+    metric: donation ? 'troops_donated' : trophies ? 'trophies' : null,
     role: role ? role.replace(/-/g, '').replace(/^coleader$/, 'coLeader') : null,
     asks_count: count
   };
@@ -186,7 +186,7 @@ export function executeIntent(question, { players = [], currentWarMembers = [] }
     if (!result) return null;
     return {
       intent: 'structured_clan_query',
-        scope: 'clan',
+      scope: 'clan',
       query: plan.metric,
       sort: plan.sort,
       result_count: result.rows.length,
@@ -198,7 +198,7 @@ export function executeIntent(question, { players = [], currentWarMembers = [] }
     if (!result) return null;
     return {
       intent: 'structured_clan_query',
-        scope: 'clan',
+      scope: 'clan',
       query: 'role',
       role: plan.role,
       result_count: result.rows.length,

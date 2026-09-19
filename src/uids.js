@@ -3,8 +3,8 @@
 //   Normal Clan War: CW001           session
 //                    CW001-ATK001    attack
 //   CWL:             CWL001          season
-//                     CWL001-D1       league day
-//                      CWL001-D1-ATK01 attack
+//                    CWL001-D1       league day
+//                    CWL001-D1-ATK01 attack
 //   Capital Raid:    CR001           season
 //                    CR001-R1        raid against one opponent
 //                    CR001-R1-ATK001 attack
