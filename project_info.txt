@@ -21,3 +21,69 @@ Ponyo does two things:
 Two Node.js entrypoints, one Render web service:
   npm start      -> src/runtime.js    Discord bot
   npm run sync   -> src/index.js      Sync scheduler
+
+
+ANSWER PIPELINE (READ THIS FIRST)
+---------------------------------
+  /ask or /tell
+    |
+    v
+  discord.js handleAiCommand()
+    Loads the last 5 turns (ai_conversations, RAM fallback) and builds TWO
+    strings: question (CURRENT question only) and contextualQuestion
+    (question + RECENT CONVERSATION CONTEXT). Calls
+    generator(question, contextualQuestion)  // ai.answer / ai.tell
+    |
+    v
+  ai.js answerWithAi(question, contextualQuestion, provider)
+    - buildContext(question) uses ONLY the current question. Conversation
+      history must never enter scope detection, or old turns mentioning
+      e.g. "capital raid" hijack the routing of a new "clan war" question
+      (this was a real bug; see git history).
+    - runDeterministicQuery(question) produces structured_query, which the
+      system prompt declares AUTHORITATIVE for filters/counts/rankings.
+    - provider(contextualQuestion, context) -- history is used ONLY to
+      resolve follow-up references (they/them/that war).
+    - on provider failure: falls back to deterministic text with a note.
+    |
+    v
+  LLM provider (askSarvam / askGemini)
+    System prompt = SYSTEM_BASE (answer scope, clan-chat rules, IST date
+    format, role mapping, dataset separation). User message = question +
+    JSON DATABASE CONTEXT.
+    |
+    v
+  discord.js splits the reply into 1800-char pages (max 10 list items per
+  page); the full answer is stored in ai_answers for See more/See less.
+
+
+QUERY ENGINE (src/queryEngine.js) -- pure, unit-tested, no DB access
+---------------------------------------------------------------------
+buildQueryPlan(question) returns:
+  scope:      'cwl' | 'capital' | 'war' | 'clan' | 'general'
+              Detection order matters: cwl -> capital -> war -> clan.
+              Negated dataset mentions ("not capital raid", "not cwl") are
+              stripped first via stripNegatedDatasets(), so "i mean the
+              clan war, not capital raid" routes to war.
+  operation:  clan_identity | member_attack_usage | opponent | state |
+              timing | statistics | members | member_metric | role_members
+  filters:    unused (0 attacks), attacks_used (exact), attacks_used_min
+              ("at least N"), attacks_remaining ("N attacks left"),
+              metric/role for clan questions.
+
+applyAttackUsageFilters(rows, plan) is the ONE shared filter implementation
+used by both the pure executor and the DB-backed router.
+
+QUERY ROUTER (src/queryRouter.js)
+----------------------------------
+runDeterministicQuery(question) maps a plan to real rows:
+  - war:     LIVE CoC API first (state, time left, fresh members/attacks);
+             Supabase cw_session fallback when the API is down.
+  - cwl:     latest synced league day ONLY, participants scoped to that day.
+  - capital: latest synced season ONLY. For plan.unused ("who has not
+             attacked") the answer comes from the season ABSENTEES list,
+             not participant rows -- see the Supabase section.
+
+LIVE DATA (src/liveData.js): getLiveWar/getLiveCapital call the CoC API at
+answer time with a 45 s TTL cache (LIVE_DATA_TTL_MS). Failed fetches
+re-serve the last known value for 10 s instead of erroring the answer.
