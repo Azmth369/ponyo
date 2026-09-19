@@ -87,6 +87,52 @@ export async function getCwlAttacks(filters = {}) {
   return (data ?? []).map(r => ({ season_key: r.cwl_day_uid, war_tag: r.cwl_day_uid, round_no: r.battle_day, attacker_tag: r.attacker_id, attacker_name: r.attacker_name_with_map_position, defender_tag: null, defender_name: r.defender_name_with_map_position, stars: r.star_scored, destruction_percentage: r.destruction_caused, order_no: r.index_no, attack_time: r.attacking_date_time, data: r.data }));
 }
 
+export async function getLatestCwlDay() {
+  // Latest synced CWL day (current one while a league runs, otherwise the
+  // most recent). Used to scope participant queries to a single day instead
+  // of mixing every day of every season.
+  const { data, error } = await db.from('cwl_daywise_attacklog')
+    .select('generated_cwl_day_id,battle_day,battle_start,battle_end,opponent_clan_name,opponent_clan_id')
+    .order('battle_start', { ascending: false, nullsFirst: false })
+    .limit(1);
+  if (error) throw error;
+  const r = (data ?? [])[0];
+  if (!r) return null;
+  return {
+    day_uid: r.generated_cwl_day_id,
+    battle_day: r.battle_day,
+    start_time: r.battle_start,
+    end_time: r.battle_end,
+    opponent_clan_name: r.opponent_clan_name,
+    opponent_clan_id: r.opponent_clan_id
+  };
+}
+
+export async function getLatestCapitalSeason() {
+  // Latest synced capital raid season (the ongoing weekend while it runs,
+  // otherwise the most recent one).
+  const { data, error } = await db.from('capital_raid_season')
+    .select('generated_uid,battle_start,battle_end,total_loot,raids_won,total_attacks')
+    .order('battle_start', { ascending: false, nullsFirst: false })
+    .limit(1);
+  if (error) throw error;
+  const r = (data ?? [])[0];
+  if (!r) return null;
+  const endMs = r.battle_end ? new Date(r.battle_end).getTime() : null;
+  const startMs = r.battle_start ? new Date(r.battle_start).getTime() : null;
+  const now = Date.now();
+  const state = startMs != null && now < startMs ? 'upcoming' : endMs != null && now > endMs ? 'ended' : 'ongoing';
+  return {
+    season_key: r.generated_uid,
+    start_time: r.battle_start,
+    end_time: r.battle_end,
+    state,
+    total_loot: r.total_loot,
+    raids_completed: r.raids_won,
+    total_attacks: r.total_attacks
+  };
+}
+
 export async function getCapitalParticipants(filters = {}) {
   let q = db.from('capital_raid_participants').select('*').order('player_name');
   if (filters.seasonKey) q = q.eq('capital_raid_uid', filters.seasonKey);

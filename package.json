@@ -8,7 +8,7 @@
     "start": "node src/runtime.js",
     "sync": "node src/index.js",
     "sync:once": "node src/sync.js",
-    "test": "node --test src/queryEngine.test.js src/uids.test.js src/sync.test.js",
+    "test": "node --test src/queryEngine.test.js src/uids.test.js src/sync.test.js src/liveData.test.js",
     "import:legacy": "node src/importLegacyAttackLog.js"
   },
   "engines": {
