@@ -1,13 +1,13 @@
-# Clash of Clans Discord AI Bot
+# Ponyo — Clash of Clans Discord AI Bot
 
-A production-oriented Discord assistant combining **Clash of Clans API data, a dedicated Supabase database, targeted retrieval, deterministic analytics, and two AI providers**.
+A production-oriented Discord assistant combining **Clash of Clans API data, a dedicated Supabase database, the Ponyo UID system, deterministic analytics, and two AI providers** (Sarvam for `/ask`, Gemini for `/tell`).
 
 ## Commands
 
-- `/ask` → **Sarvam AI** for the normal, faster everyday clan analysis path.
-- `/tell` → **Gemini** for the deeper Gemini analysis path.
+- `/ask` → **Sarvam AI** (`sarvam-105b`) for the fast everyday clan analysis path.
+- `/tell` → **Gemini** for the deeper analysis path.
 
-Both commands use the same database retrieval and analytics layer, so they answer from the same Clash of Clans data rather than from unrelated general knowledge.
+Factual questions ("who has one attack left?", "who has the lowest donations?", "who are the elders?") are answered **deterministically in code** before any AI provider is involved — they are instant, free and cannot hallucinate counts. Only questions the deterministic engine cannot parse reach the AI providers, and even then the embedded structured result is authoritative.
 
 ## Architecture
 
@@ -15,171 +15,75 @@ Both commands use the same database retrieval and analytics layer, so they answe
 Clash of Clans API
         │
         ▼
- Sync scheduler ──────► Dedicated Supabase
-  (server-side key)       │
+ Sync scheduler ──────► Dedicated Supabase (Ponyo schema)
+  (server-side key)       │  CW001 / CWL001 / CR001 UID system
                           │
-                          ├── read-only AI retrieval
+                          ├── read-only AI retrieval (anon key, RLS)
                           │       ▼
+                          │   Deterministic query engine ──► direct answer
+                          │       ▼ (unparsed questions)
                           │   Sarvam / Gemini
                           │       ▼
                           │    Discord
                           │
                           └── backend-only AI state
-                              (pagination + short memory)
+                              (ai_answers, ai_conversations, ai_chat, sync_runs)
 ```
 
-This project is independent of the existing CoC watcher database. All secrets remain server-side. The AI retrieval layer uses the anonymous/read-only key for CoC data, while the combined Render runtime also uses the service-role key for the backend-only `ai_answers` and `ai_conversations` tables so Discord state survives restarts.
+## The UID system
 
-## Features
+Every event is identified by a human-readable UID (mirrors the spreadsheet design in `database/`):
 
-### Data collection
-- Clan/member data
-- Current war polling
-- War-log history
-- Normalized war members and attacks
-- CWL seasons, rounds, individual CWL wars, members and attacks
-- Capital raid seasons
-- Player snapshots for historical trends
-- Sync status/error logging
-- Configurable polling intervals
-- One-time importer for legacy attack-log exports
+| Domain | Session | Day / Raid | Attack |
+|---|---|---|---|
+| Normal Clan War | `CW001` | — | `CW001-ATK001` |
+| CWL | `CWL001` | `CWL001-D1` | `CWL001-D1-ATK01` |
+| Capital Raid | `CR001` | `CR001-R1` | `CR001-R1-ATK001` |
 
-### AI retrieval
-Questions are classified before retrieval so the model receives relevant data instead of an uncontrolled database dump.
+- UIDs are allocated sequentially and re-syncs resolve the **same** event via natural-key lookups (battle window, CWL war tag, capital season start), so no duplicates are created.
+- Attack rows are numbered in a stable order (map position, then attack order) and rewritten per event on each sync, so numbering always matches the current API state.
+- Old timestamp-based UIDs (`#CLAN:20260915T...`) are migrated automatically at startup by `src/migrateUids.js`.
 
-Examples:
+## Data collection
 
-```text
-/ask question:"who has the lowest donations?"
-/ask question:"who didn't attack in the current war?"
-/ask question:"how are we doing in the current war?"
-/tell question:"summarize our wars against Dark Land"
-/tell question:"show me the attacks from our war against XYZ"
-/ask question:"what happened in March 2026?"
-```
+- Clan/member data (`clan_info`) with rolling snapshots (`clan_info_snap`, last 12 batches by default — see `SNAPSHOT_KEEP_BATCHES`), used to compute **last activity** per member.
+- Current war polling + war-log history (`cw_session`, `cw_session_participants`, `cw_attacklog`).
+- CWL seasons, league days, members and attacks (`cwl_seasons`, `cwl_daywise_attacklog`, `cwl_season_participants`, `cwl_attacklog`).
+- Capital raid seasons, raids and attacks (`capital_raid_season`, `capital_raid_participants`, `capital_raid_attacklog`), with participants/absentees computed against the roster snapshot from the raid start.
+- Sync status/error logging (`sync_runs`).
+- Configurable polling intervals and per-job enable flags (all environment-controlled).
+- One-time importer for legacy attack-log exports: `npm run import:legacy -- <path-to-csv>`.
 
-Retrieval follows the intended safe-expansion strategy:
+## AI retrieval
 
-1. Match the question to a data domain.
-2. Retrieve the narrowest useful context.
-3. If a named opponent search returns nothing, expand to recent war history.
-4. Give the selected context to the requested AI provider.
-5. The provider must never invent missing statistics, attacks, dates, opponents or outcomes.
+Questions are classified before retrieval so the model receives relevant data instead of an uncontrolled database dump:
 
-### Two AI providers
+1. Match the question to a data domain (query engine).
+2. Answer deterministically when the intent is structured (attack usage, member metrics, roles, war state/timing/opponent).
+3. Otherwise retrieve the narrowest useful context and give it to the requested provider.
+4. If a named opponent search returns nothing, expand to recent war history.
+5. The provider must never invent or recompute clan-specific facts.
 
-`/ask` uses Sarvam's OpenAI-compatible Chat Completions API and defaults to `sarvam-105b`, with `SARVAM_MODEL` available to override it.
+Timestamps shown to users are always converted to IST (DD/MM/YYYY, 24-hour).
 
-`/tell` uses the Gemini REST API with the existing model fallback/retry chain. `GEMINI_MODEL` controls the preferred Gemini model.
+## Persistent long-answer controls
 
-### AI provider failure alerts
+Long responses are split into Discord-safe chunks with **See more** / **See less** controls. The full answer is stored in the backend-only `ai_answers` table for 30 days, and one-hour conversation memory lives in `ai_conversations`, so both survive restarts and redeploys. Every question and answer is also logged to `ai_chat`.
 
-The bot can send detailed, private provider failure alerts to a dedicated Discord channel by setting `PONYO_ALERT_CHANNEL_ID` to that channel's ID.
-
-Provider errors are classified separately for:
-
-- Context-window/token-size failures
-- Quota/rate-limit failures
-- API-key/authentication failures
-- Temporary provider/API failures
-- Unknown provider failures
-
-Users receive a short safe message with the recommended alternative (`/tell` for Gemini) instead of the raw provider response. The private Ponyo alert contains diagnostic details such as HTTP status, error body, command, user/channel context, question, and failure timing. Do not expose that alert channel to ordinary members.
-
-### Deterministic analytics
-The application calculates evidence such as missed attacks and player trends in code before AI interpretation. This reduces hallucination risk for straightforward numerical questions.
-
-### Persistent long-answer controls
-Long AI responses are split into Discord-safe chunks. Instead of the old **Previous/Next** pagination and custom forwarding button, the response now uses **See more** and **See less** controls. Only the user who asked the question can expand or collapse that answer.
-
-Pagination state is not dependent on an in-memory collector. The full answer is stored in the backend-only `ai_answers` table for 30 days, so the buttons can continue working after a Render restart or redeploy. The button `custom_id` also carries the current page, so navigation itself does not depend on process memory.
-
-The previous one-hour AI conversation memory is also stored in the backend-only `ai_conversations` table. This means a normal follow-up can survive a Render restart as long as it is still inside the one-hour context window.
-
-For sharing an answer to another Discord channel, use Discord's built-in message forwarding feature.
-
-## Legacy attack-log import
-
-If you have an older `attack_log` CSV export, do **not** upload the raw CSV into GitHub or commit it to the repository because it can contain player names and tags.
-
-The repository includes a one-time importer that converts the old mixed format into the current split schema:
-
-- `context=capital` → `capital_attacks` plus a lightweight `capital_raids` event record
-- `context=war` → `war_attacks` plus a lightweight `wars` event record
-- Existing rows are safely upserted using the same conflict keys as the live sync, so running the importer again does not intentionally create duplicate attack rows.
-- Missing fields such as historical attack timestamps, war results, or Capital summary totals are left unknown rather than invented.
-
-Run it from the project environment after placing the CSV somewhere accessible to that environment:
+## Testing
 
 ```bash
-npm run import:legacy -- /path/to/attack_log_rows.csv
+npm test        # query engine, UID system, and payload transformations
 ```
 
-The importer uses `SUPABASE_SERVICE_ROLE_KEY`, so run it only in the trusted server environment. Never expose that key to users or client-side code.
+Pure payload transformations live in `src/transform.js` with no I/O, so they are fully unit-tested; CI (GitHub Actions, Node 22) runs the suite on every push and pull request.
 
-## Environment
+## Requirements
 
-Configure:
+- Node.js >= 22 (supabase-js requires native WebSocket).
+- A Supabase project with the Ponyo schema applied: run `supabase/ponyo_schema.sql` once, then `supabase/migrations/20260919_sync_runs.sql`.
+- Environment variables per `env.example`.
 
-- `COC_API_TOKEN`
-- `COC_CLAN_TAG`
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY` — server-side only; required by the sync scheduler and backend AI-state persistence
-- `SUPABASE_ANON_KEY` — AI/Discord read-only access to the CoC data tables
-- `DISCORD_TOKEN`
-- `DISCORD_CLIENT_ID`
-- optional `DISCORD_GUILD_ID` for instant guild command registration
-- optional `PONYO_ALERT_CHANNEL_ID` — private Discord channel for detailed AI provider/quota/API failure alerts
-- `SARVAM_API_KEY` — required for `/ask`
-- optional `SARVAM_MODEL` (defaults to `sarvam-105b`)
-- `GEMINI_API_KEY` — required for `/tell`
-- optional `GEMINI_MODEL`
+## AI provider failure alerts
 
-Never commit secrets or raw player data exports.
-
-## Supabase setup
-
-Create a **separate Supabase project** for this bot and run `supabase/schema.sql` in its SQL editor.
-
-The CoC data tables use RLS with `anon` SELECT policies for the AI retrieval layer. The `ai_answers` and `ai_conversations` tables are backend-only and have no `anon` access. The Render runtime uses the server-side service-role key for those two state tables; that key must never be exposed to Discord users, browser code, or the repository.
-
-## Render + UptimeRobot
-
-The runtime exposes a lightweight `/health` endpoint on `PORT` (default `3000`). Point UptimeRobot at the Render service's `/health` URL.
-
-UptimeRobot is useful for external monitoring and, on plans where an HTTP request wakes an idle service, can also keep a Render web service receiving traffic. It does **not** replace persistent storage: Render's service filesystem is ephemeral across deploys, while the AI state is intentionally stored in Supabase.
-
-## Run locally
-
-```bash
-npm install
-npm start
-```
-
-`npm start` launches both the Discord bot and sync scheduler. A lightweight HTTP health endpoint is available at `/health` on `PORT` (default `3000`).
-
-Run only the sync scheduler:
-
-```bash
-npm run sync
-```
-
-Run one complete sync pass:
-
-```bash
-npm run sync:once
-```
-
-## Security model
-
-```text
-CoC API token ──► server runtime ──write──► Supabase
-                       │                    │
-                       │                    ├── CoC data ← anon read-only AI client
-                       │                    │
-                       └── backend-only AI state ← service-role key
-                                                    │
-                                                  Discord
-```
-
-The service-role key is a server-side secret. It is not sent to Discord clients or exposed in bot responses.
+The bot can send detailed, private provider failure alerts to a dedicated Discord channel via `PONYO_ALERT_CHANNEL_ID`. Provider errors are classified separately for context-window, quota/rate-limit, API-key, temporary and unknown failures; users receive a short safe message instead of the raw provider response.
