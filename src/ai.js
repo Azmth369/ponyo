@@ -1,18 +1,22 @@
-// AI layer: builds a scoped, classified database context for a question and
-// hands it to the requested provider (Sarvam for /ask, Gemini for /tell).
-// Deterministic questions never reach the provider (see
-// answerWithDeterministicFirst).
+// AI layer: builds a scoped, classified database + live context for a
+// question and hands it to the requested provider (Sarvam for /ask, Gemini
+// for /tell). Every answer passes through the provider for the final
+// judgement; the structured query result (Supabase + live CoC API) is
+// embedded as the authoritative source. If the provider fails, the
+// deterministic text is used as a fallback.
 
 import 'dotenv/config';
 import {
   getPlayers, getCurrentWar, searchWars, getSnapshots, getCapitalSeasons, getCwlSeasons,
-  getCwlWars, getWarAttacks, getWarMembers, getCwlAttacks, getCapitalAttacks
+  getCwlWars, getWarAttacks, getWarMembers, getCwlAttacks, getCapitalAttacks,
+  getLatestCwlDay, getCwlParticipants, getLatestCapitalSeason, getCapitalParticipants
 } from './retrieval.js';
 import { getClan } from './cocApi.js';
 import { capitalPlayerLeaderboard } from './analytics.js';
 import { compactCapitalRaidContext, compactWarAttackContext, compactCwlAttackContext } from './eventGrouping.js';
-import { executeIntent } from './queryEngine.js';
+import { runDeterministicQuery } from './queryRouter.js';
 import { answerDeterministically } from './deterministicAnswer.js';
+import { getLiveWar, getLiveCapital } from './liveData.js';
 import { formatDiscordTimestamps } from './format.js';
 
 const MONTHS = /january|february|march|april|may|june|july|august|september|october|november|december|month|year|trend|history|improv|declin/i;
@@ -143,6 +147,9 @@ async function buildContext(question) {
   if (kind.war) {
     const current = await getCurrentWar();
     context.current_war = current;
+    // Real-time war snapshot: state, time left and live scores straight from
+    // the CoC API (the synced rows can be up to 10 minutes old).
+    context.live_war = await getLiveWar();
     if (current?.war_key) {
       context.current_war_members = enrichWarMembers(await getWarMembers(current.war_key));
       context.current_war_attacks = await getWarAttacks(current.war_key);
@@ -169,6 +176,26 @@ async function buildContext(question) {
   }
 
   if (kind.capital) {
+    // Real-time capital raid weekend snapshot + the participants of exactly
+    // one weekend, so players are never duplicated across seasons.
+    context.live_capital = await getLiveCapital();
+    const currentSeason = await getLatestCapitalSeason();
+    if (currentSeason) {
+      const participants = await getCapitalParticipants({ seasonKey: currentSeason.season_key, limit: 60 });
+      context.capital_current_season = {
+        season_key: currentSeason.season_key,
+        state: context.live_capital?.state ?? currentSeason.state,
+        start_time: currentSeason.start_time,
+        end_time: currentSeason.end_time,
+        participants: participants.map(p => ({
+          name: p.player_name,
+          tag: p.player_id,
+          attacks_used: Number(p.attacks_used ?? 0),
+          attacks_available: Number(p.attacks_available ?? 0),
+          total_loot: Number(p.total_loot ?? 0)
+        }))
+      };
+    }
     const seasons = await getCapitalSeasons(50);
     if (kind.eventGrouping) {
       context.capital_raid_categories = await buildCapitalGrouping();
@@ -199,6 +226,25 @@ async function buildContext(question) {
   }
 
   if (kind.cwl) {
+    // Latest synced league day + its participants, so players are never
+    // duplicated across days or seasons.
+    const currentDay = await getLatestCwlDay();
+    if (currentDay) {
+      const participants = await getCwlParticipants({ dayUid: currentDay.day_uid, limit: 60 });
+      context.cwl_current_day = {
+        day_uid: currentDay.day_uid,
+        battle_day: currentDay.battle_day,
+        opponent: currentDay.opponent_clan_name,
+        start_time: currentDay.start_time,
+        end_time: currentDay.end_time,
+        participants: participants.map(p => ({
+          name: p.player_name,
+          tag: p.player_id,
+          attacks_used: Number(p.attacks_used ?? 0),
+          attacks_available: Number(p.attacks_available ?? 0)
+        }))
+      };
+    }
     if (kind.eventGrouping) {
       context.cwl_event_categories = await buildCwlGrouping();
     } else {
@@ -216,12 +262,15 @@ async function buildContext(question) {
     context.historical_capital_attacks = await getCapitalAttacks({ attackerTag: player?.tag, limit: 300 });
   }
 
-  // The structured query result is authoritative for the underlying filter,
-  // count, ranking or ordering (see ANSWER_SCOPE below).
-  context.structured_query = executeIntent(question, {
-    players,
-    currentWarMembers: context.current_war_members ?? []
-  });
+  // The structured query result (Supabase + live CoC API) is authoritative
+  // for the underlying filter, count, ranking or ordering (see ANSWER_SCOPE
+  // below).
+  try {
+    context.structured_query = await runDeterministicQuery(question);
+  } catch (error) {
+    console.error('[ai] structured query failed; continuing without it', error?.message ?? error);
+    context.structured_query = null;
+  }
 
   if (Object.keys(context).length === 2 && !context.structured_query?.result) {
     context.players = players.length ? players : normalizePlayers(await getPlayers({ limit: 100 }));
@@ -231,7 +280,7 @@ async function buildContext(question) {
   return context;
 }
 
-const ANSWER_SCOPE = `Answer the user's exact question and nothing more. Do not dump unrelated database rows. When DATABASE CONTEXT contains structured_query with intent 'structured_clan_query' or 'structured_query', its source and result are authoritative for the underlying clan-specific filter, count, ranking, ordering, or event fact; do not recompute or change that result. For all other clan-specific questions, use the relevant scoped context (clan, current_war, cwl, capital_raids, history) and answer directly from it. Do not require a dedicated intent for a question merely because the user asks for a different field. When the question is about a war/event, do not use the clan identity/name as the answer to an opponent/event question; use the relevant event context. Explain the result briefly and naturally. If result_count is zero, say no matching records were found. If the user asks for names, give names only unless more is requested. If the user asks for names and tags, give names with tags. Do not expose internal query-engine details unless asked.`;
+const ANSWER_SCOPE = `Answer the user's exact question and nothing more. Do not dump unrelated database rows. When DATABASE CONTEXT contains structured_query with intent 'structured_clan_query' or 'structured_query', its source and result are authoritative for the underlying clan-specific filter, count, ranking, ordering, or event fact; do not recompute or change that result. When live_war or live_capital is present in the context, it is a real-time snapshot from the Clash of Clans API: it takes priority over synced database rows for the current war/raid state, time remaining and live scores. For all other clan-specific questions, use the relevant scoped context (clan, current_war, cwl, capital_raids, history) and answer directly from it. Do not require a dedicated intent for a question merely because the user asks for a different field. When the question is about a war/event, do not use the clan identity/name as the answer to an opponent/event question; use the relevant event context. Explain the result briefly and naturally, summarising before listing (for example, lead with the overall war standing, then the relevant members). If result_count is zero, say no matching records were found. If the user asks for names, give names only unless more is requested. If the user asks for names and tags, give names with tags. Do not expose internal query-engine details unless asked.`;
 
 const CLAN_CHAT_RULES = `CLAN CHAT / CLAN MAIL REFERENCE RULES: Each individual clan-chat message must be 128 characters or fewer; a single prompt/message may tag at most 5 clan members. If drafting a clan-chat message would exceed 128 characters, rewrite it to fit. Multiple separate clan-chat messages each have their own 128-character limit. Clan Mail uses the supplied reference limit of up to 500 characters and 14-day persistence. Do not confuse these limits.`;
 
@@ -321,20 +370,35 @@ async function askSarvam(question, context) {
   return formatDiscordTimestamps(json.choices?.[0]?.message?.content || 'No answer generated.');
 }
 
-async function answerWithDeterministicFirst(question, generator) {
-  const deterministic = await answerDeterministically(question);
-  if (deterministic) return deterministic.text;
-  return generator();
+// Every answer goes through the AI provider for the final judgement (the
+// structured database + live result is embedded in the context as the
+// authoritative source). If the provider fails, the deterministic text is
+// used as a fallback so the user still gets a correct, if plain, answer.
+async function answerWithAi(question, provider) {
+  const context = await buildContext(question);
+  try {
+    return await provider(question, context);
+  } catch (error) {
+    try {
+      const deterministic = await answerDeterministically(question);
+      if (deterministic?.text) {
+        return `${deterministic.text}\n\n(Answered from structured clan data because the AI provider was unavailable — ask again shortly for a fuller reply.)`;
+      }
+    } catch (fallbackError) {
+      console.error('[ai] deterministic fallback failed', fallbackError);
+    }
+    throw error;
+  }
 }
 
 export async function answer(question) {
   if (!question?.trim()) throw new Error('Question cannot be empty');
   const clean = question.trim();
-  return answerWithDeterministicFirst(clean, () => askSarvam(clean, buildContext(clean)));
+  return answerWithAi(clean, askSarvam);
 }
 
 export async function tell(question) {
   if (!question?.trim()) throw new Error('Question cannot be empty');
   const clean = question.trim();
-  return answerWithDeterministicFirst(clean, () => askGemini(clean, buildContext(clean)));
+  return answerWithAi(clean, askGemini);
 }
