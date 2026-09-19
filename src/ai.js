@@ -15,6 +15,7 @@ import { getClan } from './cocApi.js';
 import { capitalPlayerLeaderboard } from './analytics.js';
 import { compactCapitalRaidContext, compactWarAttackContext, compactCwlAttackContext } from './eventGrouping.js';
 import { runDeterministicQuery } from './queryRouter.js';
+import { stripNegatedDatasets } from './queryEngine.js';
 import { answerDeterministically } from './deterministicAnswer.js';
 import { getLiveWar, getLiveCapital } from './liveData.js';
 import { formatDiscordTimestamps } from './format.js';
@@ -28,7 +29,8 @@ const EVENT_GROUPING = /categor(?:ize|y)|categoris|group|grouping|breakdown|acco
 const ROLE_NAMES = { leader: 'Leader', coleader: 'Co-Leader', admin: 'Elder', member: 'Member' };
 
 function classify(question) {
-  const q = question.toLowerCase();
+  // Negated dataset mentions ("not capital raid") must not flip the scope.
+  const q = stripNegatedDatasets(question.toLowerCase());
   const capital = CAPITAL.test(q);
   const cwl = CWL.test(q);
   return {
@@ -374,10 +376,15 @@ async function askSarvam(question, context) {
 // structured database + live result is embedded in the context as the
 // authoritative source). If the provider fails, the deterministic text is
 // used as a fallback so the user still gets a correct, if plain, answer.
-async function answerWithAi(question, provider) {
+//
+// The context and the structured query are built from the CURRENT question
+// only; the conversation history is passed to the provider separately so old
+// turns mentioning other datasets ("capital raid") cannot hijack scope
+// detection for follow-up questions.
+async function answerWithAi(question, contextualQuestion, provider) {
   const context = await buildContext(question);
   try {
-    return await provider(question, context);
+    return await provider(contextualQuestion, context);
   } catch (error) {
     try {
       const deterministic = await answerDeterministically(question);
@@ -391,14 +398,14 @@ async function answerWithAi(question, provider) {
   }
 }
 
-export async function answer(question) {
+export async function answer(question, contextualQuestion) {
   if (!question?.trim()) throw new Error('Question cannot be empty');
   const clean = question.trim();
-  return answerWithAi(clean, askSarvam);
+  return answerWithAi(clean, contextualQuestion?.trim() || clean, askSarvam);
 }
 
-export async function tell(question) {
+export async function tell(question, contextualQuestion) {
   if (!question?.trim()) throw new Error('Question cannot be empty');
   const clean = question.trim();
-  return answerWithAi(clean, askGemini);
+  return answerWithAi(clean, contextualQuestion?.trim() || clean, askGemini);
 }
