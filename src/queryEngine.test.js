@@ -131,6 +131,15 @@ test('how-are-we-performing maps to war statistics', () => {
   assert.equal(plan.operation, 'statistics');
 });
 
+test('negated dataset mentions do not hijack the scope', () => {
+  const correction = buildQueryPlan('i mean the clan war, not capital raid');
+  assert.equal(correction.scope, 'war');
+  const correction2 = buildQueryPlan('not cwl, the normal war');
+  assert.equal(correction2.scope, 'war');
+  const stillCapital = buildQueryPlan('capital raid not war');
+  assert.equal(stillCapital.scope, 'capital');
+});
+
 test('clan identity and member metric questions', () => {
   const identity = buildQueryPlan("what is our clan's tag");
   assert.equal(identity.operation, 'clan_identity');

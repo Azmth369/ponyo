@@ -9,6 +9,16 @@ function normalize(text = '') {
   return String(text).toLowerCase().replace(/[’']/g, "'").replace(/\s+/g, ' ').trim();
 }
 
+// Drops negated dataset mentions ("not capital raid", "not cwl") so
+// corrections like "i mean the clan war, not capital raid" still route to
+// the war dataset instead of the negated one.
+export function stripNegatedDatasets(text = '') {
+  return String(text ?? '').replace(
+    /\b(?:not|instead of|exclude)\s+(?:the\s+|any\s+)?(?:capital\s+raids?|capital|raid weekend|cwl|clan war league)\b/g,
+    ''
+  );
+}
+
 function numberFrom(text) {
   if (text == null) return null;
   const raw = String(text).toLowerCase();
@@ -17,10 +27,11 @@ function numberFrom(text) {
 }
 
 function detectScope(q) {
-  if (/\b(?:cwl|clan war league|league day)\b/.test(q)) return 'cwl';
-  if (/\b(?:capital raid|capital raids|raid weekend|capital)\b/.test(q)) return 'capital';
-  if (/\b(?:current war|clan war|clan wars|war|wars|fighting|opponent|enemy clan|versus|vs\.?|against|attack|attacked|attacks)\b/.test(q)) return 'war';
-  if (/\b(?:member|members|player|players|clan|donation|donations|trophies|town hall|role|elder|elders|leader|leaders|co-?leaders?)\b/.test(q)) return 'clan';
+  const cleaned = stripNegatedDatasets(q);
+  if (/\b(?:cwl|clan war league|league day)\b/.test(cleaned)) return 'cwl';
+  if (/\b(?:capital raid|capital raids|raid weekend|capital)\b/.test(cleaned)) return 'capital';
+  if (/\b(?:current war|clan war|clan wars|war|wars|fighting|opponent|enemy clan|versus|vs\.?|against|attack|attacked|attacks)\b/.test(cleaned)) return 'war';
+  if (/\b(?:member|members|player|players|clan|donation|donations|trophies|town hall|role|elder|elders|leader|leaders|co-?leaders?)\b/.test(cleaned)) return 'clan';
   return 'general';
 }
 
