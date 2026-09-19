@@ -44,7 +44,11 @@ function buildFilters(q) {
     q.match(/\b(?:attacked?|used|made|did)\s+(twice|thrice)\b/) ||
     q.match(new RegExp(`\\b(${NUMBER_WORD})\\s+attacks?\\b`))
   );
-  const used = usedMatch ? numberFrom(usedMatch[1]) : null;
+  let used = usedMatch ? numberFrom(usedMatch[1]) : null;
+  // "at least N attacks" means N or more, not exactly N.
+  const atLeast = /\bat\s?-?\s?least\b/.test(q);
+  const usedMin = atLeast && used !== null ? used : null;
+  if (usedMin !== null) used = null;
 
   const asksLowest = /\b(?:lowest|least|minimum|min)\b/.test(q);
   const asksHighest = /\b(?:highest|most|maximum|max|top)\b/.test(q);
@@ -65,6 +69,7 @@ function buildFilters(q) {
   return {
     unused,
     attacks_used: used,
+    attacks_used_min: usedMin,
     attacks_remaining: remaining,
     sort: asksLowest ? 'asc' : asksHighest ? 'desc' : null,
     metric: donation ? 'troops_donated' : trophies ? 'trophies' : null,
@@ -88,11 +93,11 @@ export function buildQueryPlan(question = '') {
   let operation = 'general';
   if (asksClanIdentity) operation = 'clan_identity';
   else if (scope === 'war' || scope === 'cwl' || scope === 'capital') {
-    if (filters.unused || filters.attacks_used !== null || filters.attacks_remaining !== null) operation = 'member_attack_usage';
+    if (filters.unused || filters.attacks_used !== null || filters.attacks_used_min !== null || filters.attacks_remaining !== null) operation = 'member_attack_usage';
     else if (asksOpponent) operation = 'opponent';
     else if (/\b(?:state|status|phase)\b/.test(q)) operation = 'state';
     else if (/\b(?:when|date|time|start|started|end|ends|ended|duration|how long)\b/.test(q)) operation = 'timing';
-    else if (/\b(?:star|stars|destruction|score|percentage|percent|result)\b/.test(q)) operation = 'statistics';
+    else if (/\b(?:star|stars|destruction|score|percentage|percent|result|performing|performance|doing|going)\b/.test(q)) operation = 'statistics';
     else if (/\b(?:member|members|player|players|team|lineup|participants?)\b/.test(q)) operation = 'members';
   } else if (scope === 'clan') {
     if (filters.metric && (filters.sort || filters.asks_count)) operation = 'member_metric';
@@ -117,6 +122,9 @@ export function understandQuestion(question = '') {
 export function applyAttackUsageFilters(rows, plan) {
   let filtered = [...(rows ?? [])];
   if (plan.unused) filtered = filtered.filter(r => Number(r.attacks_used ?? 0) === 0);
+  if (plan.attacks_used_min !== null && plan.attacks_used_min !== undefined) {
+    filtered = filtered.filter(r => Number(r.attacks_used ?? 0) >= plan.attacks_used_min);
+  }
   if (plan.attacks_used !== null && plan.attacks_used !== undefined) {
     filtered = filtered.filter(r => Number(r.attacks_used ?? 0) === plan.attacks_used);
   }
@@ -176,7 +184,7 @@ export function executeIntent(question, { players = [], currentWarMembers = [] }
       intent: 'structured_clan_query',
       scope: plan.scope,
       query: 'attack_usage',
-      filter: { unused: plan.unused, attacks_used: plan.attacks_used, attacks_remaining: plan.attacks_remaining },
+      filter: { unused: plan.unused, attacks_used: plan.attacks_used, attacks_used_min: plan.attacks_used_min ?? null, attacks_remaining: plan.attacks_remaining },
       result_count: result.rows.length,
       result: result.remaining
     } : null;
