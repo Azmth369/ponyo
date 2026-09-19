@@ -20,8 +20,14 @@ export async function allocateSeq(table, column, prefix, width = 3) {
   return formatSeq(prefix, nextSeq(uids, prefix), width);
 }
 
-async function recentRows(table, select, order, limit) {
-  const { data, error } = await db.from(table).select(select).order(...order).limit(limit);
+async function recentRows(table, select, orders, limit) {
+  let q = db.from(table).select(select);
+  for (const { column, ascending = true, nullsFirst } of orders) {
+    const opts = { ascending };
+    if (nullsFirst != null) opts.nullsFirst = nullsFirst;
+    q = q.order(column, opts);
+  }
+  const { data, error } = await q.limit(limit);
   if (error) throw error;
   return data ?? [];
 }

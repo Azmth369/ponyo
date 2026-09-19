@@ -50,13 +50,13 @@ function buildFilters(q) {
   const asksHighest = /\b(?:highest|most|maximum|max|top)\b/.test(q);
   const donation = /\bdonat(?:ion|ions|ed|e)?\b/.test(q);
   const trophies = /\btroph(?:y|ies)\b/.test(q);
-  const roleMatch = /\b(elder|elders|leader|leaders|co-?leader|co-?leaders)\b/.exec(q)?.[1] ?? null;
+  const roleMatch = /\b(co\s?-?leaders?|elders?|leaders?)\b/.exec(q)?.[1] ?? null;
   // "member(s)" only counts as a role when the question explicitly says "role",
   // so "how many members are in the clan" is a member-count question instead.
   const memberRole = /\brole\b/.test(q) ? 'member' : null;
   // clan_info stores raw CoC API role values: leader, coLeader, admin, member.
   const RAW_ROLE = { elder: 'admin', leader: 'leader', coleader: 'coLeader', member: 'member' };
-  const singular = value => String(value ?? '').replace(/-/g, '').replace(/s$/, '');
+  const singular = value => String(value ?? '').replace(/[\s-]/g, '').replace(/s$/, '');
   const role = roleMatch
     ? (RAW_ROLE[singular(roleMatch)] ?? singular(roleMatch))
     : memberRole;
