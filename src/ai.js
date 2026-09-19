@@ -195,7 +195,11 @@ async function buildContext(question) {
           attacks_used: Number(p.attacks_used ?? 0),
           attacks_available: Number(p.attacks_available ?? 0),
           total_loot: Number(p.total_loot ?? 0)
-        }))
+        })),
+        // The CoC API only lists members who already attacked; absentees are
+        // the roster members (when the weekend began) who have not attacked.
+        // "Who has not attacked" must be answered from this list.
+        absentees: currentSeason.absentees ?? []
       };
     }
     const seasons = await getCapitalSeasons(50);
