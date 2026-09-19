@@ -32,6 +32,13 @@ async function recentRows(table, select, orders, limit) {
   return data ?? [];
 }
 
+// PostgREST returns timestamptz as "2026-09-18T07:00:00+00:00" while the
+// CoC API path produces "2026-09-18T07:00:00.000Z", so timestamps must be
+// compared by instant, never by string equality (string comparison made every
+// re-sync allocate a brand-new UID, duplicating each war/season ~10 times).
+const sameInstant = (a, b) =>
+  a != null && b != null && new Date(a).getTime() === new Date(b).getTime();
+
 // A normal war session is identified by its battle window. The currentwar
 // endpoint provides startTime; warlog entries only provide endTime, so both
 // are accepted as identity.
@@ -43,8 +50,7 @@ export async function findWarSessionUid({ battleStart, battleEnd }) {
     300
   );
   const row = rows.find(r =>
-    (battleStart != null && r.battle_start === battleStart) ||
-    (battleEnd != null && r.battle_end === battleEnd)
+    sameInstant(battleStart, r.battle_start) || sameInstant(battleEnd, r.battle_end)
   );
   return row?.cw_uid ?? null;
 }
@@ -69,6 +75,6 @@ export async function findCwlDayUid(warTag) {
 export async function findCapitalSeasonUid(battleStart) {
   if (battleStart == null) return null;
   const rows = await recentRows('capital_raid_season', 'generated_uid,battle_start', [{ column: 'battle_start', ascending: false, nullsFirst: false }], 200);
-  const row = rows.find(r => r.battle_start === battleStart);
+  const row = rows.find(r => sameInstant(battleStart, r.battle_start));
   return row?.generated_uid ?? null;
 }
