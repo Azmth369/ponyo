@@ -1,0 +1,23 @@
+================================================================================
+PONYO - CLASH OF CLANS CLAN DATA SYNC + DISCORD AI BOT
+Developer Reference
+================================================================================
+
+WHAT THIS IS
+------------
+Ponyo does two things:
+
+1. SYNC: pulls data from the official CoC API on a schedule and writes it
+   into a Supabase (PostgreSQL) database using a human-readable UID system
+   (CW001, CWL001-D1-ATK01, CR001-R1-ATK001).
+
+2. ANSWER: two Discord slash commands -- /ask (Sarvam LLM, fast) and
+   /tell (Gemini LLM, deeper) -- answer natural-language questions about
+   the clan. Every answer is grounded: a deterministic query layer fetches
+   structured rows (Supabase + live CoC API), embeds them into the LLM
+   context as the authoritative source, and the LLM only polishes the
+   final wording.
+
+Two Node.js entrypoints, one Render web service:
+  npm start      -> src/runtime.js    Discord bot
+  npm run sync   -> src/index.js      Sync scheduler
