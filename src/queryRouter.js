@@ -96,8 +96,7 @@ export async function runDeterministicQuery(question) {
 
   if (plan.operation === 'clan_identity') {
     const clan = await getClan();
-    return {
-      intent: 'structured_query', scope: 'clan', query: 'clan_identity', field: plan.identity_field,
+    return { intent: 'structured_query', scope: 'clan', query: 'clan_identity', field: plan.identity_field,
       result_count: 1,
       result: [{ name: clan.name ?? null, tag: clan.tag ?? null, members: Number(clan.members ?? clan.memberList?.length ?? 0) }]
     };
@@ -269,6 +268,22 @@ export async function runDeterministicQuery(question) {
       total_loot: liveCapital?.capital_total_loot ?? season.total_loot ?? null
     };
     if (plan.operation === 'member_attack_usage') {
+      // The CoC API only lists capital members who already attacked, so
+      // participant rows can never answer "who has not attacked". That
+      // answer comes from the season's absentees: the clan roster when the
+      // weekend began, minus everyone who has attacked.
+      if (plan.unused) {
+        return {
+          intent: 'structured_clan_query',
+          scope: 'capital',
+          query: 'attack_usage',
+          filter: { unused: true, attacks_used: null, attacks_used_min: null, attacks_remaining: null },
+          result_count: (season.absentees ?? []).length,
+          result: (season.absentees ?? []).map(name => ({ name, attacks_used: 0, attacks_available: 0, attacks_remaining: 0 })),
+          event,
+          note: 'Members of the roster when the raid weekend began who have not used any attacks in this weekend.'
+        };
+      }
       return { ...attackUsageResult(plan, members), event };
     }
     if (plan.operation === 'members') {
