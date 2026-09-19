@@ -1,63 +1,87 @@
-import { test } from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  buildQueryPlan,
-  applyAttackUsageFilters,
-  deterministicWarMembers,
-  deterministicMemberMetric,
-  deterministicRole
-} from './queryEngine.js';
+import { buildQueryPlan, understandQuestion, deterministicWarMembers, deterministicMemberMetric, deterministicRole, applyAttackUsageFilters } from './queryEngine.js';
 
 const members = [
-  { player_name: 'A', player_id: '#AAA', map_position: 3, attacks_used: 0, attacks_available: 2, stars_earned: 0, destruction_percentage: 0 },
-  { player_name: 'B', player_id: '#BBB', map_position: 1, attacks_used: 1, attacks_available: 2, stars_earned: 3, destruction_percentage: 78.5 },
-  { player_name: 'C', player_id: '#CCC', map_position: 2, attacks_used: 2, attacks_available: 2, stars_earned: 5, destruction_percentage: 92.1 }
+  { player_name: 'A', player_id: '#PA', attacks_used: 0, attacks_available: 2, map_position: 1 },
+  { player_name: 'B', player_id: '#PB', attacks_used: 1, attacks_available: 2, map_position: 2 },
+  { player_name: 'C', player_id: '#PC', attacks_used: 2, attacks_available: 2, map_position: 3 }
 ];
 
-test('understands unused and unused-like phrasings', () => {
-  for (const q of ['who has not attacked', "who hasn't used their attacks", 'who is yet to attack', 'who did not attack', 'who used no attacks']) {
-    const plan = buildQueryPlan(q);
-    assert.equal(plan.unused, true, q);
-    assert.equal(plan.operation, 'member_attack_usage', q);
-  }
+test('routes normal war questions by broad dataset and generic operation', () => {
+  const opponent = buildQueryPlan('Which clan are we currently at war with?');
+  assert.equal(opponent.scope, 'war');
+  assert.equal(opponent.operation, 'opponent');
+  assert.equal(opponent.intent, 'general');
+
+  const fighting = buildQueryPlan('Who are we fighting right now?');
+  assert.equal(fighting.scope, 'war');
+  assert.equal(fighting.operation, 'opponent');
+  assert.equal(fighting.intent, 'general');
+
+  const state = buildQueryPlan('What is the current war state?');
+  assert.equal(state.scope, 'war');
+  assert.equal(state.operation, 'state');
+  assert.equal(state.intent, 'general');
 });
 
-test('understands remaining attacks before used attacks', () => {
-  const plan = buildQueryPlan('who has one attack left');
-  assert.equal(plan.attacks_remaining, 1);
-  assert.equal(plan.attacks_used, null);
-  const rows = deterministicWarMembers('who has one attack left', members).rows.map(r => r.player_name);
-  assert.deepEqual(rows, ['B']);
+test('does not create a sentence-specific intent for different current-war questions', () => {
+  const questions = [
+    'Who are we fighting?',
+    'What is the current war status?',
+    'When does the war end?',
+    'How many members are in the war?',
+    'What is our war score?',
+    'Who has not attacked yet?'
+  ];
+  const plans = questions.map(buildQueryPlan);
+  assert.deepEqual(plans.slice(0, 5).map(p => p.scope), ['war', 'war', 'war', 'war', 'war']);
+  assert.equal(plans[0].intent, 'general');
+  assert.equal(plans[1].intent, 'general');
+  assert.equal(plans[2].intent, 'general');
+  assert.equal(plans[3].intent, 'general');
+  assert.equal(plans[4].intent, 'general');
+  assert.equal(plans[5].operation, 'member_attack_usage');
 });
 
 test('understands reusable attack filters across war types', () => {
-  for (const scope of ['current war', 'cwl', 'capital raid']) {
-    const plan = buildQueryPlan(`who has unused attacks in the ${scope}`);
-    assert.equal(plan.unused, true);
-    assert.equal(plan.scope, scope === 'cwl' ? 'cwl' : scope === 'capital raid' ? 'capital' : 'war');
-  }
+  const unused = understandQuestion("Who hasn't used an attack in the current war?");
+  assert.equal(unused.scope, 'war');
+  assert.equal(unused.intent, 'war_attack_usage');
+  assert.equal(unused.unused, true);
+  const remaining = understandQuestion('Who has one attack left?');
+  assert.equal(remaining.intent, 'war_attack_usage');
+  assert.equal(remaining.attacks_remaining, 1);
+  assert.equal(remaining.attacks_used, null);
+  const exact = understandQuestion('Who attacked twice?');
+  assert.equal(exact.intent, 'war_attack_usage');
+  assert.equal(exact.attacks_used, 2);
 });
 
 test('understands CWL and Capital Raid attack usage', () => {
-  const cwl = buildQueryPlan('who has one attack remaining in cwl');
-  assert.equal(cwl.attacks_remaining, 1);
+  const cwl = understandQuestion('Who has one attack left in CWL?');
   assert.equal(cwl.scope, 'cwl');
-  const capital = buildQueryPlan('who used two attacks in the capital raid');
-  assert.equal(capital.attacks_used, 2);
+  assert.equal(cwl.intent, 'war_attack_usage');
+  assert.equal(cwl.attacks_remaining, 1);
+  const capital = understandQuestion('Who has not attacked in the Capital Raid?');
   assert.equal(capital.scope, 'capital');
+  assert.equal(capital.intent, 'war_attack_usage');
+  assert.equal(capital.unused, true);
 });
 
 test('filters deterministically and orders by map position', () => {
-  const result = deterministicWarMembers('who has not attacked', members);
-  assert.deepEqual(result.rows.map(r => r.player_name), ['A']);
-  const all = deterministicWarMembers('who has unused attacks', members);
-  assert.deepEqual(all.rows.map(r => r.player_name), ['A']);
+  const result = deterministicWarMembers('Who has one attack left?', members);
+  assert.deepEqual(result.rows.map(r => r.player_name), ['B']);
+  const zero = deterministicWarMembers("Who hasn't used an attack?", members);
+  assert.deepEqual(zero.rows.map(r => r.player_name), ['A']);
+  const explicit = deterministicWarMembers('Who has not attacked yet?', members);
+  assert.deepEqual(explicit.rows.map(r => r.player_name), ['A']);
 });
 
-test('member metric questions use numeric fields', () => {
+test('finds lowest donation member', () => {
   const players = [
-    { name: 'A', tag: '#A', troops_donated: 500, trophies: 4000 },
-    { name: 'B', tag: '#B', troops_donated: 10, trophies: 3000 }
+    { name: 'A', tag: '#A', troops_donated: 50 },
+    { name: 'B', tag: '#B', troops_donated: 10 }
   ];
   const result = deterministicMemberMetric('who has the lowest donations?', players);
   assert.equal(result.rows[0].name, 'B');
