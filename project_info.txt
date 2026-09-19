@@ -87,3 +87,156 @@ runDeterministicQuery(question) maps a plan to real rows:
 LIVE DATA (src/liveData.js): getLiveWar/getLiveCapital call the CoC API at
 answer time with a 45 s TTL cache (LIVE_DATA_TTL_MS). Failed fetches
 re-serve the last known value for 10 s instead of erroring the answer.
+
+
+================================================================================
+SUPABASE -- DEEP DIVE
+================================================================================
+
+PROJECT
+-------
+One Supabase project (PostgreSQL 17), everything in the public schema.
+Canonical DDL is supabase/ponyo_schema.sql; incremental fixes are dated,
+idempotent files in supabase/migrations/.
+
+TWO SEPARATE CLIENTS (security-relevant)
+----------------------------------------
+  src/db.js         SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
+                    Service-role client, used ONLY by the sync layer.
+  src/retrieval.js  SUPABASE_URL + SUPABASE_ANON_KEY (or _READONLY_KEY)
+                    Read-only client used by the AI answer path.
+
+db.js also exports upsert(table, rows), which resolves the correct
+onConflict key per table from a hardcoded map (conflictKeys).
+
+ROW LEVEL SECURITY
+-------------------
+RLS is ENABLED on every table. The schema creates per-table SELECT policies
+(pony_read_<table>) that allow anonymous reads for the answer path. Writes
+are only possible with the service-role key. There are deliberately no
+INSERT/UPDATE/DELETE policies for anon.
+
+
+THE UID SYSTEM
+--------------
+Every event row carries a human-readable sequential UID, allocated as
+MAX(existing)+1 per table via uidAlloc.allocateSeq:
+
+  CW001                 one normal clan war session
+  CW001-ATK001          one attack inside that war
+  CWL001                one CWL season
+  CWL001-D1             one league day (battle) inside the season
+  CWL001-D1-ATK01       one attack inside a league day
+  CR001                 one Capital Raid weekend (a season)
+  CR001-R1              one raid (one attacked defender clan) inside the
+                        weekend; R-numbering is stable across re-syncs
+                        (assigned in API order per defender)
+  CR001-R1-ATK001      one attack inside that raid
+
+CRITICAL RULE -- how re-syncs resolve an existing event (uidAlloc.js):
+findWarSessionUid and findCapitalSeasonUid compare timestamps BY INSTANT
+(new Date(a).getTime() === new Date(b).getTime()), NEVER by string equality.
+PostgREST returns timestamptz as 2026-09-18T07:00:00+00:00 while the CoC API
+path produces 2026-09-18T07:00:00.000Z. String comparison never matches,
+which historically made every sync allocate a NEW UID for the same
+war/weekend, duplicating each event ~10x (fixed by
+migrations/20260919b_dedupe_event_copies.sql). Keep the instant comparison.
+
+CWL lookups match on stable identifiers instead of timestamps: seasons by
+data->>season, days by data->>warTag.
+
+
+TABLES
+------
+Sync domain (service-role writes; every table has a data jsonb column with
+the raw API payload for debugging/re-derivation):
+
+  clan_info                 Current roster, one row per player, player_id
+                            (= CoC #TAG) primary key. Roles are RAW CoC
+                            values: leader, coLeader, admin, member.
+                            admin means ELDER in-game, never display it as a
+                            Discord admin. last_active is bumped by
+                            snapshot diffs.
+  clan_info_snap            Periodic roster snapshots (one batch per
+                            date_time). Used for activity detection and to
+                            reconstruct the roster as it was when a capital
+                            weekend began. Trimmed to the last 12 batches
+                            (SNAPSHOT_KEEP_BATCHES).
+  cw_session                One normal war. Unique cw_uid. Identified by its
+                            battle window; warlog imports have NULL
+                            battle_start and only battle_end.
+  cw_session_participants   One row per war roster player. Unique (cw_uid,
+                            player_id). attacks_available=2.
+  cw_attacklog              One row per attack; delete+inserted per war.
+  cwl_seasons               One CWL season, unique generated_cwl_id.
+  cwl_daywise_attacklog     One row per league day; carries both participant
+                            lists (ours + opponent) as jsonb. Days resolve by
+                            data->>warTag.
+  cwl_season_participants   One row per player per league day. Unique
+                            (cwl_day_uid, player_id). attacks_available=1.
+  cwl_attacklog             Attacks per league day, delete+inserted per day.
+  capital_raid_season       One raid weekend. Unique generated_uid. Also
+                            stores participants_name / absentees_name arrays
+                            and participants_no / absentees_no (see below).
+  capital_raid_participants One row per member PER WEEKEND who has attacked
+                            at least once. Unique (capital_raid_uid,
+                            player_id). attacks_available = attackLimit +
+                            bonusAttackLimit (so 6 on bonus weekends).
+  capital_raid_attacklog    One row per attack, delete+inserted per season;
+                            raid_no is the R-number of the defender clan.
+  sync_runs                 Health log: one row per sync job execution (job,
+                            status ok/error, details jsonb, message). Check
+                            this FIRST when a sync looks wrong.
+
+AI domain (via aiState.js):
+  ai_chat             Raw question/answer log (messenger, provider,
+                      question, answer).
+  ai_conversations    Per user+guild+channel rolling memory for follow-ups;
+                      expiry-based cleanup.
+  ai_answers          Stored full answers backing the See more/See less
+                      buttons; expiry + Discord message id attachment.
+
+WRITE PATTERNS -- three rules, do not break them:
+  1. Attack tables (cw_attacklog, cwl_attacklog, capital_raid_attacklog)
+     and ALL participant tables are DELETE+INSERTED per event on every
+     sync. This makes re-syncs idempotent even where a unique constraint
+     is missing, so duplicate players can never accumulate.
+  2. Session/season/day headers are upserted with onConflict on their UID.
+  3. clan_info is upserted on player_id; snapshots are plain inserts.
+
+
+CAPITAL RAIDS -- THE ABSENTEE RULE (very important)
+---------------------------------------------------
+The CoC API capitalraidseasons endpoint returns members ONLY for players
+who have already attacked at least once in the weekend. A player with 0
+attacks is simply NOT in that array. Consequences:
+  - capital_raid_participants can never answer who-has-not-attacked.
+  - The sync computes absentees = (clan roster snapshot at weekend start)
+    minus (attackers) and stores them on the season row
+    (transform.js participantStats).
+  - queryRouter answers plan.unused capital questions from
+    season.absentees, and ai.js exposes capital_current_season.absentees
+    to the LLM so it cannot improvise the list from war data.
+If you change how participants are stored, preserve this computation or
+who-has-not-attacked-in-the-capital-raid silently breaks.
+
+
+DATA NORMALIZATION CONVENTIONS
+-------------------------------
+  - CoC role values stored raw (leader, coLeader, admin, member).
+  - Warlog results win/lose/tie normalized to win/loss/draw.
+  - Timestamps are timestamptz instants; the display layer converts to IST
+    (DD/MM/YYYY HH:mm, Asia/Kolkata).
+  - Player identity = CoC player tag (#XXXX) as player_id / attacker_id /
+    defenderTag depending on table.
+
+MIGRATIONS
+----------
+  supabase/ponyo_schema.sql                         full canonical schema
+  supabase/migrations/20260919_dedupe_participants.sql
+       duplicate participant cleanup + unique (event, player) constraints
+  supabase/migrations/20260919b_dedupe_event_copies.sql
+       collapses duplicated war/season headers (one per battle window,
+       newest UID kept) and deletes their stale child rows.
+Run migrations in the Supabase SQL editor; they are idempotent. Schema
+changes go into NEW dated migration files, never edit old ones.
