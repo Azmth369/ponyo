@@ -67,7 +67,7 @@ function liveMembers(team) {
     stars_earned: (Array.isArray(m.attacks) ? m.attacks : []).reduce((s, a) => s + Number(a.stars ?? 0), 0),
     destruction_percentage: (Array.isArray(m.attacks) ? m.attacks : []).reduce((s, a) => s + Number(a.destructionPercentage ?? 0), 0),
     data: m
-  });
+  }));
 }
 
 export function normalizeLiveWar(war, now = Date.now()) {
