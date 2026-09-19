@@ -118,6 +118,19 @@ test('applyAttackUsageFilters is shared logic: unused, exact and remaining', () 
   assert.deepEqual(applyAttackUsageFilters(members, remPlan).map(r => r.player_name), ['A']);
 });
 
+test('at-least attack questions filter by a minimum, not an exact count', () => {
+  const plan = buildQueryPlan('who has done atleast one attack');
+  assert.equal(plan.attacks_used_min, 1);
+  assert.equal(plan.attacks_used, null);
+  assert.deepEqual(applyAttackUsageFilters(members, plan).map(r => r.player_name), ['B', 'C']);
+});
+
+test('how-are-we-performing maps to war statistics', () => {
+  const plan = buildQueryPlan('how we are performing in our current clan war');
+  assert.equal(plan.scope, 'war');
+  assert.equal(plan.operation, 'statistics');
+});
+
 test('clan identity and member metric questions', () => {
   const identity = buildQueryPlan("what is our clan's tag");
   assert.equal(identity.operation, 'clan_identity');
