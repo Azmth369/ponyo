@@ -303,7 +303,9 @@ async function sendPonyoAlert({ interaction, provider, question, error, classifi
 client.once('clientReady', readyClient => console.log(`Discord bot online as ${readyClient.user.tag}`));
 
 async function handleAiCommand(interaction, provider, generator) {
-  await interaction.deferReply({ ephemeral: true });
+  // Public (non-ephemeral) reply: Discord does not allow pinning or
+  // forwarding ephemeral messages, so answers must be regular messages.
+  await interaction.deferReply();
   const started = Date.now();
   let question = '';
   try {
