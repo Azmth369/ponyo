@@ -63,6 +63,8 @@ export async function saveNormalWar(war, cwUid) {
   if (removed.error) throw removed.error;
   if (rows.attacks.length) await upsert('cw_attacklog', rows.attacks);
 
+  const removedParticipants = await db.from('cw_session_participants').delete().eq('cw_uid', cwUid);
+  if (removedParticipants.error) throw removedParticipants.error;
   if (rows.participants.length) await upsert('cw_session_participants', rows.participants);
   return { members: rows.participants.length, attacks: rows.attacks.length, cwUid };
 }
@@ -270,6 +272,8 @@ async function saveCwlWar(war, dayUid, roundNo) {
       data: m
     };
   });
+  const removedParticipants = await db.from('cwl_season_participants').delete().eq('cwl_day_uid', dayUid);
+  if (removedParticipants.error) throw removedParticipants.error;
   if (participants.length) await upsert('cwl_season_participants', participants);
   return { participants: participants.length, attacks: attackRows.length, dayUid };
 }
