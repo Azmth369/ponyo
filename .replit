@@ -1,5 +1,0 @@
-entrypoint = "src/runtime.js"
-run = "npm start"
-
-[deployment]
-run = ["npm", "start"]
