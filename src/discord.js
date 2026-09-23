@@ -10,6 +10,7 @@ import {
   SlashCommandBuilder
 } from 'discord.js';
 import { answer, tell } from './ai.js';
+import { ponyoAnswer } from './ponyoRepoAi.js';
 import {
   attachAiAnswerMessage,
   cleanupAiState,
@@ -53,6 +54,15 @@ const commands = [
     .addStringOption(option => option
       .setName('question')
       .setDescription('Ask a data-backed question about the clan')
+      .setRequired(true)
+      .setMaxLength(1000))
+    .toJSON(),
+  new SlashCommandBuilder()
+    .setName('ponyo')
+    .setDescription('Talk to Ponyo about its current source code and architecture')
+    .addStringOption(option => option
+      .setName('question')
+      .setDescription('Ask about Ponyo code, architecture, bugs, data flow, or implementation')
       .setRequired(true)
       .setMaxLength(1000))
     .toJSON()
@@ -404,6 +414,10 @@ client.on('interactionCreate', async interaction => {
     }
     if (interaction.commandName === 'tell') {
       await handleAiCommand(interaction, 'Gemini', tell);
+      return;
+    }
+    if (interaction.commandName === 'ponyo') {
+      await handleAiCommand(interaction, 'Ponyo AI', ponyoAnswer);
       return;
     }
   }
