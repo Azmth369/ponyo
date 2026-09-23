@@ -4,6 +4,8 @@ A production-oriented Discord assistant combining **Clash of Clans API data, a d
 
 ## Commands
 
+- `/ponyo` → **Ponyo AI repository assistant**. It reads the current local Ponyo source tree, selects the most relevant files for the question, and uses Gemini to explain architecture, trace data flow, diagnose likely bugs, or propose implementation changes. It also uses the existing one-hour Discord conversation memory, so follow-up questions can refer to "that file" or "the previous function".
+
 - `/ask` → **Sarvam AI** (`sarvam-105b`) for the fast everyday clan analysis path.
 - `/tell` → **Gemini** for the deeper analysis path.
 
