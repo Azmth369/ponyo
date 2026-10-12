@@ -12,12 +12,12 @@ paths:
     get:
       operationId: getPlayerCapitalContribution
       summary: Get a player's lifetime Clan Capital contribution
-      description: Use this endpoint when asked for a player's total Capital contribution or contribution reputation. This is the lifetime clanCapitalContributions statistic from the player's live profile, not total loot gained in a single Capital Raid Weekend.
+      description: Use this endpoint when asked for a player's total Capital contribution or contribution reputation. Prefer the player's exact player tag when available: tags are looked up directly against the live player profile and do not need to be in the current clan roster. Names are matched against current clan members and stored Capital Raid participants. This is the lifetime clanCapitalContributions statistic from the live profile, not total loot gained in a single Capital Raid Weekend.
       parameters:
         - in: query
           name: player
           required: true
-          description: Exact player name or player tag. If multiple players match, the response lists candidates to disambiguate.
+          description: Exact player tag (recommended; works even if the player is no longer in the current clan) or player name. If multiple names match, the response lists candidates to disambiguate.
           schema:
             type: string
       responses:
