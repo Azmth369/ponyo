@@ -149,6 +149,18 @@ export async function syncClan(captureSnapshots = false) {
     date_time: nowIso(),
     data: m
   }));
+  // clan_info is the current roster table: remove players who are no longer
+  // in the live clan. Historical snapshots remain untouched in clan_info_snap.
+  const existingIds = await db.from('clan_info').select('player_id').limit(1000);
+  if (existingIds.error) throw existingIds.error;
+  const currentIds = new Set(members.map(m => m.tag));
+  const staleIds = (existingIds.data ?? [])
+    .map(row => row.player_id)
+    .filter(id => id && !currentIds.has(id));
+  for (let i = 0; i < staleIds.length; i += 100) {
+    const removed = await db.from('clan_info').delete().in('player_id', staleIds.slice(i, i + 100));
+    if (removed.error) throw removed.error;
+  }
   if (rows.length) await upsert('clan_info', rows);
 
   let snapshotInfo = null;
