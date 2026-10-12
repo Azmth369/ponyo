@@ -33,17 +33,23 @@ paths:
     get:
       operationId: getClanMembers
       summary: List clan members or search by player name
+      description: For questions about the full clan roster, request limit=100. The response includes totalMembers for the actual live roster size and count for records returned. Use search to find a specific player without fetching the full roster.
       parameters:
         - in: query
           name: search
           required: false
+          description: Optional player-name search.
           schema:
             type: string
         - in: query
           name: limit
           required: false
+          description: Number of records to return. Use 100 to retrieve the full roster (maximum 100).
           schema:
             type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
       responses:
         '200':
           description: Clan member records
