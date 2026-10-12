@@ -279,6 +279,67 @@ export async function handleApi(req, res, url) {
       return true;
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/v1/cwl/history') {
+      const seasonLimit = Math.min(12, Math.max(1, Number(url.searchParams.get('seasons')) || 3));
+      const roundLimit = Math.min(7, Math.max(1, Number(url.searchParams.get('rounds')) || 7));
+      const seasonRows = await rows(
+        db.from('cwl_seasons')
+          .select('generated_cwl_id,battle_start,battle_end,stars_scored,clan_participants_no,data')
+          .order('battle_start', { ascending: false, nullsFirst: false })
+          .limit(seasonLimit)
+      );
+
+      const seasons = [];
+      for (const season of seasonRows) {
+        const prefix = `${season.generated_cwl_id}-D`;
+        const dayRows = await rows(
+          db.from('cwl_daywise_attacklog')
+            .select('generated_cwl_day_id,battle_day,battle_start,battle_end,size,opponent_clan_name,opponent_clan_id,our_clan_score,opponent_clan_score,data')
+            .like('generated_cwl_day_id', `${prefix}%`)
+            .order('battle_day', { ascending: true })
+            .limit(roundLimit)
+        );
+        const ids = dayRows.map(day => day.generated_cwl_day_id);
+        let participants = [];
+        if (ids.length) {
+          participants = await rows(
+            db.from('cwl_season_participants')
+              .select('cwl_day_uid,player_name,player_id,attacks_used,attacks_available,stars_scored,destruction_caused,player_map_position')
+              .in('cwl_day_uid', ids)
+              .order('stars_scored', { ascending: false })
+              .limit(500)
+          );
+        }
+        const rounds = dayRows.map(day => ({
+          ...day,
+          warType: 'CWL',
+          result: Number(day.our_clan_score ?? 0) > Number(day.opponent_clan_score ?? 0)
+            ? 'win'
+            : Number(day.our_clan_score ?? 0) < Number(day.opponent_clan_score ?? 0)
+              ? 'loss' : 'draw',
+          participants: participants.filter(p => p.cwl_day_uid === day.generated_cwl_day_id)
+        }));
+        seasons.push({
+          seasonId: season.generated_cwl_id,
+          season: season.data?.season ?? null,
+          battleStart: season.battle_start,
+          battleEnd: season.battle_end,
+          starsScored: season.stars_scored,
+          clanParticipants: season.clan_participants_no,
+          rounds
+        });
+      }
+
+      send(res, 200, {
+        data: seasons,
+        count: seasons.length,
+        source: 'supabase',
+        warType: 'CWL',
+        note: 'This endpoint returns Clan War League season rounds stored separately from regular Clan War history. A season can have fewer stored rounds if the clan was not in the league or some war tags could not be fetched.'
+      });
+      return true;
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/v1/capital-raids/latest') {
       const seasons = await rows(db.from('capital_raid_season').select('*').order('battle_start', { ascending: false }).limit(1));
       if (!seasons.length) { send(res, 200, { data: null }); return true; }
