@@ -36,6 +36,24 @@ const startupJobs = [
 
 let syncRunning = false;
 
+// Run a manual refresh through the same lock as scheduled jobs, so requests cannot overlap.
+export async function refreshNow() {
+  if (syncRunning) return { busy: true, message: 'A sync is already running; try again shortly.' };
+  syncRunning = true;
+  const results = {};
+  try {
+    for (const [name, fn] of [
+      ['clan', () => syncClan(false)], ['war', syncWar], ['history', syncHistory],
+      ['capital', syncCapital], ['cwl', syncCwl], ['player-snapshot', () => syncClan(true)]
+    ]) {
+      results[name] = await run('manual-' + name, fn);
+    }
+    return { busy: false, completedAt: new Date().toISOString(), results };
+  } finally {
+    syncRunning = false;
+  }
+}
+
 export async function startSyncScheduler() {
   if (syncRunning) return;
   syncRunning = true;
