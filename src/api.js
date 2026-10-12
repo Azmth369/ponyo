@@ -1,5 +1,5 @@
 import { db } from './db.js';
-import { getClan as fetchClan, getCurrentWar as fetchCurrentWar } from './cocApi.js';
+import { getClan as fetchClan, getCurrentWar as fetchCurrentWar, getPlayer as fetchPlayer } from './cocApi.js';
 import { refreshNow } from './index.js';
 
 const send = (res, status, body) => {
@@ -67,6 +67,57 @@ export async function handleApi(req, res, url) {
         source: 'clash_of_clans_api',
         clanName: clan.name,
         refreshedAt: new Date().toISOString()
+      });
+      return true;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/v1/clan/player-capital-contribution') {
+      const search = (url.searchParams.get('player') ?? '').trim().slice(0, 80);
+      if (!search) {
+        send(res, 400, { error: 'Missing required player query parameter. Provide a player name or tag.' });
+        return true;
+      }
+
+      const clan = await fetchClan();
+      const roster = clan.memberList ?? [];
+      const normalized = search.toLowerCase().replace(/^#/, '');
+      const exact = roster.filter(m =>
+        m.name.toLowerCase() === search.toLowerCase() ||
+        m.tag.toLowerCase().replace(/^#/, '') === normalized
+      );
+      const matches = exact.length ? exact : roster.filter(m =>
+        m.name.toLowerCase().includes(search.toLowerCase()) ||
+        m.tag.toLowerCase().replace(/^#/, '').includes(normalized)
+      );
+
+      if (!matches.length) {
+        send(res, 404, { error: 'No current clan member matched that player name or tag.', clanName: clan.name });
+        return true;
+      }
+      if (matches.length > 1) {
+        send(res, 200, {
+          data: null,
+          ambiguous: true,
+          message: 'Multiple clan members matched. Ask the user to choose one.',
+          matches: matches.map(m => ({ name: m.name, playerTag: m.tag, townHallLevel: m.townHallLevel }))
+        });
+        return true;
+      }
+
+      const member = matches[0];
+      const player = await fetchPlayer(member.tag);
+      send(res, 200, {
+        data: {
+          name: player.name,
+          playerTag: player.tag,
+          clanName: player.clan?.name ?? clan.name,
+          townHallLevel: player.townHallLevel,
+          totalClanCapitalContribution: Number(player.clanCapitalContributions ?? 0)
+        },
+        metric: 'lifetime_clan_capital_contribution',
+        source: 'clash_of_clans_player_api',
+        checkedAt: new Date().toISOString(),
+        note: 'This is the player profile total Clan Capital contribution, not loot gained in a single Capital Raid Weekend.'
       });
       return true;
     }
