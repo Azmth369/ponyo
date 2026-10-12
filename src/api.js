@@ -282,14 +282,25 @@ export async function handleApi(req, res, url) {
     if (req.method === 'GET' && url.pathname === '/api/v1/cwl/history') {
       const seasonLimit = Math.min(12, Math.max(1, Number(url.searchParams.get('seasons')) || 3));
       const roundLimit = Math.min(7, Math.max(1, Number(url.searchParams.get('rounds')) || 7));
-      const seasonRows = await rows(
+      const normalizeTag = value => String(value ?? '').replace(/^#/, '').toUpperCase();
+      const configuredTag = normalizeTag(process.env.COC_CLAN_TAG);
+
+      // Do not assume every row in shared CWL tables belongs to this clan.
+      // Filter by the clan tags captured in the original league-group payload
+      // before applying the requested season limit.
+      const allSeasonRows = await rows(
         db.from('cwl_seasons')
           .select('generated_cwl_id,battle_start,battle_end,stars_scored,clan_participants_no,data')
           .order('battle_start', { ascending: false, nullsFirst: false })
-          .limit(seasonLimit)
+          .limit(500)
       );
-
+      const matchingSeasonRows = allSeasonRows.filter(season =>
+        Array.isArray(season.data?.clans) &&
+        season.data.clans.some(clan => normalizeTag(clan.tag) === configuredTag)
+      );
+      const seasonRows = matchingSeasonRows.slice(0, seasonLimit);
       const seasons = [];
+
       for (const season of seasonRows) {
         const prefix = `${season.generated_cwl_id}-D`;
         const dayRows = await rows(
@@ -313,10 +324,12 @@ export async function handleApi(req, res, url) {
         const rounds = dayRows.map(day => ({
           ...day,
           warType: 'CWL',
-          result: Number(day.our_clan_score ?? 0) > Number(day.opponent_clan_score ?? 0)
-            ? 'win'
-            : Number(day.our_clan_score ?? 0) < Number(day.opponent_clan_score ?? 0)
-              ? 'loss' : 'draw',
+          result: day.our_clan_score == null || day.opponent_clan_score == null
+            ? 'unknown'
+            : Number(day.our_clan_score) > Number(day.opponent_clan_score)
+              ? 'win'
+              : Number(day.our_clan_score) < Number(day.opponent_clan_score)
+                ? 'loss' : 'draw',
           participants: participants.filter(p => p.cwl_day_uid === day.generated_cwl_day_id)
         }));
         seasons.push({
@@ -335,7 +348,10 @@ export async function handleApi(req, res, url) {
         count: seasons.length,
         source: 'supabase',
         warType: 'CWL',
-        note: 'This endpoint returns Clan War League season rounds stored separately from regular Clan War history. A season can have fewer stored rounds if the clan was not in the league or some war tags could not be fetched.'
+        excludedUnverifiedSeasons: allSeasonRows.length - matchingSeasonRows.length,
+        note: matchingSeasonRows.length
+          ? 'Only CWL seasons whose stored league-group payload includes the configured clan tag are returned. Historical seasons without a verifiable clan tag are excluded rather than risking another clan\'s data.'
+          : 'No stored CWL season could be verified against the configured clan tag. This does not prove that no CWL history exists; older records may lack clan identity and need reconciliation or a fresh sync.'
       });
       return true;
     }
