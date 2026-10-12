@@ -181,6 +181,80 @@ export async function handleApi(req, res, url) {
       return true;
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/v1/clan/capital-contribution-activity') {
+      const normalizeTag = value => String(value ?? '').replace(/^#/, '').toUpperCase();
+      const configuredTag = normalizeTag(process.env.COC_CLAN_TAG);
+      const seasons = await rows(
+        db.from('capital_raid_season')
+          .select('generated_uid,battle_start,battle_end')
+          .not('battle_end', 'is', null)
+          .order('battle_end', { ascending: false })
+          .limit(20)
+      );
+      const latestSeason = seasons[0] ?? null;
+      if (!latestSeason?.battle_end) {
+        send(res, 200, {
+          data: [],
+          baselineAt: null,
+          comparisonAt: null,
+          error: 'No stored Capital Raid Weekend end time is available.',
+          note: 'Contribution deltas require a stored raid end time and snapshots before and after it.'
+        });
+        return true;
+      }
+
+      const snapshots = await rows(
+        db.from('player_capital_contribution_snap')
+          .select('clan_tag,player_tag,player_name,contribution,observed_at')
+          .eq('clan_tag', process.env.COC_CLAN_TAG)
+          .order('observed_at', { ascending: false })
+          .limit(6000)
+      );
+      const raidEnd = new Date(latestSeason.battle_end).getTime();
+      const beforeByTag = new Map();
+      const afterByTag = new Map();
+      for (const snap of snapshots) {
+        const time = new Date(snap.observed_at).getTime();
+        const tag = normalizeTag(snap.player_tag);
+        if (!tag) continue;
+        if (time <= raidEnd && !beforeByTag.has(tag)) beforeByTag.set(tag, snap);
+        if (time > raidEnd && !afterByTag.has(tag)) afterByTag.set(tag, snap);
+      }
+
+      const data = [];
+      for (const [tag, latest] of afterByTag.entries()) {
+        const baseline = beforeByTag.get(tag);
+        const currentClanTag = normalizeTag(latest.clan_tag);
+        if (configuredTag && currentClanTag !== configuredTag) continue;
+        const delta = baseline ? Number(latest.contribution) - Number(baseline.contribution) : null;
+        data.push({
+          playerTag: latest.player_tag,
+          name: latest.player_name,
+          contributionAtRaidEnd: baseline ? Number(baseline.contribution) : null,
+          contributionNow: Number(latest.contribution),
+          contributionIncrease: delta != null && delta >= 0 ? delta : null,
+          counterDecreased: delta != null && delta < 0,
+          baselineAt: baseline?.observed_at ?? null,
+          comparisonAt: latest.observed_at,
+          baselineMissing: !baseline
+        });
+      }
+      data.sort((a, b) => (b.contributionIncrease ?? -1) - (a.contributionIncrease ?? -1));
+      send(res, 200, {
+        clanTag: process.env.COC_CLAN_TAG,
+        raidSeasonId: latestSeason.generated_uid,
+        raidEndedAt: latestSeason.battle_end,
+        baselineRule: 'latest stored contribution snapshot at or before the latest stored Capital Raid Weekend end time',
+        comparisonRule: 'latest stored contribution snapshot after that raid end time',
+        snapshotCount: snapshots.length,
+        matchedPlayers: data.filter(row => row.contributionIncrease != null).length,
+        data,
+        source: 'player_capital_contribution_snap',
+        note: 'Contribution increases are lifetime player-profile counter deltas, not loot gained during that raid. A missing baseline or a decreased counter is not treated as a positive increase. Results are limited to players represented in snapshots; departed players may be absent from the current roster but remain in stored history.'
+      });
+      return true;
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/v1/clan/activity') {
       const hours = Math.min(168, Math.max(1, Number(url.searchParams.get('hours')) || 24));
       const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
