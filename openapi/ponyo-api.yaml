@@ -1,4 +1,4 @@
-openapi: 3.0.3
+openapi: 3.1.1
 info:
   title: Ponyo Clash of Clans API
   version: 1.0.3
@@ -144,7 +144,7 @@ paths:
                     type: boolean
                   data:
                     type: object
-                    properties: {}
+                    $ref: '#/components/schemas/EmptyObject'
                     additionalProperties: true
                   error:
                     type: string
@@ -182,7 +182,7 @@ paths:
                     type: boolean
                   data:
                     type: object
-                    properties: {}
+                    $ref: '#/components/schemas/EmptyObject'
                     additionalProperties: true
                   error:
                     type: string
@@ -203,7 +203,7 @@ paths:
                     type: boolean
                   data:
                     type: object
-                    properties: {}
+                    $ref: '#/components/schemas/EmptyObject'
                     additionalProperties: true
                   error:
                     type: string
@@ -230,7 +230,7 @@ paths:
                     type: boolean
                   data:
                     type: object
-                    properties: {}
+                    $ref: '#/components/schemas/EmptyObject'
                     additionalProperties: true
                   error:
                     type: string
@@ -251,7 +251,7 @@ paths:
                     type: boolean
                   data:
                     type: object
-                    properties: {}
+                    $ref: '#/components/schemas/EmptyObject'
                     additionalProperties: true
                   error:
                     type: string
@@ -272,7 +272,7 @@ paths:
                     type: boolean
                   data:
                     type: object
-                    properties: {}
+                    $ref: '#/components/schemas/EmptyObject'
                     additionalProperties: true
                   error:
                     type: string
@@ -294,7 +294,7 @@ paths:
                     type: boolean
                   data:
                     type: object
-                    properties: {}
+                    $ref: '#/components/schemas/EmptyObject'
                     additionalProperties: true
                   error:
                     type: string
@@ -316,3 +316,11 @@ components:
     BearerAuth:
       type: http
       scheme: bearer
+
+  schemas:
+    EmptyObject:
+      type: object
+      properties:
+        ok:
+          type: boolean
+      additionalProperties: true
