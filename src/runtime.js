@@ -2,16 +2,22 @@ import 'dotenv/config';
 import http from 'node:http';
 import './discord.js';
 import { startSyncScheduler } from './index.js';
+import { handleApi } from './api.js';
 
 const port = Number(process.env.PORT || 3000);
-const server = http.createServer((req, res) => {
-  if (req.url === '/health' || req.url === '/') {
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url ?? '/', 'http://localhost');
+  if (url.pathname === '/health' || url.pathname === '/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, service: 'coc-discord-bot' }));
+    res.end(JSON.stringify({ ok: true, service: 'ponyo-coc-api' }));
     return;
   }
-  res.writeHead(404);
-  res.end('Not found');
+  try {
+    if (await handleApi(req, res, url)) return;
+  } catch (error) {
+    console.error('[runtime] request error:', error?.message ?? 'unknown error');
+  }
+  if (!res.headersSent) { res.writeHead(404, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Not found' })); }
 });
 
 server.listen(port, '0.0.0.0', () => console.log(`[runtime] health server listening on ${port}`));
