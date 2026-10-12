@@ -1,0 +1,136 @@
+openapi: 3.1.0
+info:
+  title: Ponyo Clash of Clans API
+  version: 1.0.4
+  description: Read Clash of Clans clan, war, capital raid, player activity, and sync data.
+servers:
+  - url: https://ponyo-v845.onrender.com
+paths:
+  /api/v1/clan/player-capital-contribution:
+    get:
+      operationId: getPlayerCapitalContribution
+      summary: Get a player's lifetime Clan Capital contribution
+      parameters:
+        - name: player
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Player contribution result
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/clan/activity:
+    get:
+      operationId: getClanPlayerActivity
+      summary: Get inferred last observed activity for clan members
+      responses:
+        '200':
+          description: Clan member activity report
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/clan/summary:
+    get:
+      operationId: getClanSummary
+      summary: Get clan roster summary
+      responses:
+        '200':
+          description: Clan summary
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/clan/members:
+    get:
+      operationId: getClanMembers
+      summary: List clan members or search by player name
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
+      responses:
+        '200':
+          description: Clan member records
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/war/current:
+    get:
+      operationId: getCurrentWar
+      summary: Get current war data
+      responses:
+        '200':
+          description: Current war data
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/war/history:
+    get:
+      operationId: getWarHistory
+      summary: List recent synced wars
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: War history
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/capital-raids/latest:
+    get:
+      operationId: getLatestCapitalRaid
+      summary: Get latest Capital Raid Weekend and participants
+      responses:
+        '200':
+          description: Latest raid data
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/sync/status:
+    get:
+      operationId: getSyncStatus
+      summary: Get recent sync outcomes
+      responses:
+        '200':
+          description: Sync status
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/sync/refresh:
+    post:
+      operationId: refreshClashOfClansData
+      summary: Refresh supported Clash of Clans datasets
+      description: Call only when the user explicitly asks to refresh the data.
+      responses:
+        '200':
+          description: Refresh results
+          content:
+            application/json:
+              schema:
+                type: object
+        '409':
+          description: A sync is already running
