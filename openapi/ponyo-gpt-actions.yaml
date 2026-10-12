@@ -252,6 +252,85 @@ paths:
                   warType: { type: string, description: Always regular_clan_war for this endpoint }
                   note: { type: string }
                 additionalProperties: true
+  /api/v1/cwl/history:
+    get:
+      operationId: getCwlHistory
+      summary: Get stored Clan War League season and round history
+      description: This endpoint returns CWL seasons and their league rounds, separately from regular Clan War history. Use this for CWL questions.
+      parameters:
+        - name: seasons
+          in: query
+          required: false
+          description: Number of recent stored CWL seasons, maximum 12
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 12
+            default: 3
+        - name: rounds
+          in: query
+          required: false
+          description: Maximum rounds returned per season, maximum 7
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 7
+            default: 7
+      responses:
+        '200':
+          description: CWL seasons and rounds
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        seasonId: { type: string }
+                        season: { type: [string, 'null'] }
+                        battleStart: { type: [string, 'null'] }
+                        battleEnd: { type: [string, 'null'] }
+                        starsScored: { type: [integer, 'null'] }
+                        clanParticipants: { type: [integer, 'null'] }
+                        rounds:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              generated_cwl_day_id: { type: string }
+                              battle_day: { type: integer }
+                              battle_start: { type: [string, 'null'] }
+                              battle_end: { type: [string, 'null'] }
+                              size: { type: [integer, 'null'] }
+                              opponent_clan_name: { type: [string, 'null'] }
+                              opponent_clan_id: { type: [string, 'null'] }
+                              our_clan_score: { type: [integer, 'null'] }
+                              opponent_clan_score: { type: [integer, 'null'] }
+                              warType: { type: string }
+                              result: { type: string }
+                              participants:
+                                type: array
+                                items:
+                                  type: object
+                                  properties:
+                                    player_name: { type: string }
+                                    player_id: { type: [string, 'null'] }
+                                    attacks_used: { type: [integer, 'null'] }
+                                    attacks_available: { type: [integer, 'null'] }
+                                    stars_scored: { type: [integer, 'null'] }
+                                    destruction_caused: { type: [number, 'null'] }
+                                    player_map_position: { type: [integer, 'null'] }
+                                  additionalProperties: true
+                            additionalProperties: true
+                      additionalProperties: true
+                  count: { type: integer }
+                  source: { type: string }
+                  warType: { type: string }
+                  note: { type: string }
+                additionalProperties: true
   /api/v1/capital-raids/latest:
     get:
       operationId: getLatestCapitalRaid
