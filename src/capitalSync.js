@@ -47,6 +47,8 @@ export async function syncCapital() {
   let seasons = 0;
   let participants = 0;
   let attacks = 0;
+  let preservedAttackHistory = 0;
+  let preservedParticipantHistory = 0;
 
   for (const raid of items) {
     const start = cocStamp(raid.startTime);
@@ -57,8 +59,8 @@ export async function syncCapital() {
     if (!seasonId) seasonId = await allocateSeq('capital_raid_season', 'generated_uid', 'CR');
 
     const roster = await rosterAtOrBefore(start);
+    const members = Array.isArray(raid.members) ? raid.members : [];
     const stats = participantStats(raid, roster);
-    const members = raid.members ?? [];
 
     await upsert('capital_raid_season', [{
       generated_uid: seasonId,
@@ -79,15 +81,29 @@ export async function syncCapital() {
       }
     }]);
 
+    const attackLogAvailable = Array.isArray(raid.attackLog);
     const attackRows = capitalAttackRows(seasonId, raid);
 
-    // Attacks are delete+inserted per season so ATK numbering always
-    // matches the current API state exactly.
-    const removed = await db.from('capital_raid_attacklog').delete().eq('capital_raid_uid', seasonId);
-    if (removed.error) throw removed.error;
-    if (attackRows.length) {
-      await upsert('capital_raid_attacklog', attackRows);
-      attacks += attackRows.length;
+    // Some historical API records contain season summaries but omit attackLog.
+    // Never delete known-good history just because this response lacks details.
+    // Replace detail rows only when the API returned attacks, or explicitly
+    // reports a zero-attack season with an attackLog array.
+    const canReplaceAttackHistory =
+      attackRows.length > 0 ||
+      (attackLogAvailable && Number(raid.totalAttacks ?? 0) === 0);
+
+    if (canReplaceAttackHistory) {
+      const removed = await db.from('capital_raid_attacklog').delete().eq('capital_raid_uid', seasonId);
+      if (removed.error) throw removed.error;
+      if (attackRows.length) {
+        await upsert('capital_raid_attacklog', attackRows);
+        attacks += attackRows.length;
+      }
+    } else {
+      preservedAttackHistory += 1;
+      console.warn(
+        `[capital] ${seasonId}: API returned no attack details despite totalAttacks=${raid.totalAttacks ?? 'unknown'}; preserving stored attack history`
+      );
     }
 
     // Attack UIDs per attacker, for the participants reference column.
@@ -111,20 +127,32 @@ export async function syncCapital() {
       data: member
     }));
 
-    // Participants are delete+inserted per season (like the attack rows) so
-    // re-syncs can never accumulate duplicate players, even on databases
-    // where the unique constraint is missing.
-    const removedParticipants = await db.from('capital_raid_participants').delete().eq('capital_raid_uid', seasonId);
-    if (removedParticipants.error) throw removedParticipants.error;
-    if (participantRows.length) {
+    // As with attacks, an omitted members array is not proof that the season
+    // had no participants. Preserve previously collected details in that case.
+    if (members.length > 0) {
+      const removedParticipants = await db.from('capital_raid_participants').delete().eq('capital_raid_uid', seasonId);
+      if (removedParticipants.error) throw removedParticipants.error;
       await upsert('capital_raid_participants', participantRows);
       participants += participantRows.length;
+    } else {
+      preservedParticipantHistory += 1;
+      console.warn(`[capital] ${seasonId}: API returned no member details; preserving stored participant history`);
     }
 
     seasons += 1;
-    console.log(`[capital] ${seasonId}: roster=${stats.rosterSize}, participants=${stats.participantsNo}, absentees=${stats.absenteesNo}, attacks=${raid.totalAttacks ?? 0}`);
+    console.log(
+      `[capital] ${seasonId}: roster=${stats.rosterSize}, participants=${stats.participantsNo}, absentees=${stats.absenteesNo}, attacks=${raid.totalAttacks ?? 0}, savedAttackRows=${attackRows.length}`
+    );
   }
 
-  console.log(`[capital] synced ${seasons} seasons, ${participants} participants, ${attacks} attacks`);
-  return { seasons, participants, attacks };
+  console.log(
+    `[capital] synced ${seasons} seasons, ${participants} participants, ${attacks} attacks; preserved history for ${preservedAttackHistory} attack-log and ${preservedParticipantHistory} participant seasons`
+  );
+  return {
+    seasons,
+    participants,
+    attacks,
+    preservedAttackHistory,
+    preservedParticipantHistory
+  };
 }
