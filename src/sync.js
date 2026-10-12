@@ -103,7 +103,7 @@ export async function syncHistory() {
 async function latestSnapshotBatch() {
   const { data, error } = await db
     .from('clan_info_snap')
-    .select('date_time,player_id,trophies,troops_donated,troops_received')
+    .select('date_time,player_id,th,lvl,trophies,troops_donated,troops_received')
     .order('date_time', { ascending: false })
     .limit(400);
   if (error) throw error;
@@ -190,6 +190,8 @@ export async function syncClan(captureSnapshots = false) {
       const prev = previous.players.get(m.tag);
       if (!prev) continue;
       if (prev.trophies !== (m.trophies ?? null) ||
+          prev.th !== (m.townHallLevel ?? null) ||
+          prev.lvl !== (m.expLevel ?? null) ||
           prev.troops_donated !== (m.donations ?? null) ||
           prev.troops_received !== (m.donationsReceived ?? null)) {
         changed.push(m.tag);
