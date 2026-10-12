@@ -1,4 +1,4 @@
-openapi: 3.1.1
+openapi: 3.0.3
 info:
   title: Ponyo Clash of Clans API
   version: 1.0.3
@@ -143,9 +143,7 @@ paths:
                   ok:
                     type: boolean
                   data:
-                    type: object
                     $ref: '#/components/schemas/EmptyObject'
-                    additionalProperties: true
                   error:
                     type: string
                 additionalProperties: true
@@ -181,9 +179,7 @@ paths:
                   ok:
                     type: boolean
                   data:
-                    type: object
                     $ref: '#/components/schemas/EmptyObject'
-                    additionalProperties: true
                   error:
                     type: string
                 additionalProperties: true
@@ -202,9 +198,7 @@ paths:
                   ok:
                     type: boolean
                   data:
-                    type: object
                     $ref: '#/components/schemas/EmptyObject'
-                    additionalProperties: true
                   error:
                     type: string
                 additionalProperties: true
@@ -229,9 +223,7 @@ paths:
                   ok:
                     type: boolean
                   data:
-                    type: object
                     $ref: '#/components/schemas/EmptyObject'
-                    additionalProperties: true
                   error:
                     type: string
                 additionalProperties: true
@@ -250,9 +242,7 @@ paths:
                   ok:
                     type: boolean
                   data:
-                    type: object
                     $ref: '#/components/schemas/EmptyObject'
-                    additionalProperties: true
                   error:
                     type: string
                 additionalProperties: true
@@ -271,9 +261,7 @@ paths:
                   ok:
                     type: boolean
                   data:
-                    type: object
                     $ref: '#/components/schemas/EmptyObject'
-                    additionalProperties: true
                   error:
                     type: string
                 additionalProperties: true
@@ -293,9 +281,7 @@ paths:
                   ok:
                     type: boolean
                   data:
-                    type: object
                     $ref: '#/components/schemas/EmptyObject'
-                    additionalProperties: true
                   error:
                     type: string
                 additionalProperties: true
