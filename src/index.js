@@ -45,7 +45,7 @@ async function flushPendingPlayerSnapshot() {
   pendingPlayerSnapshot = false;
   syncRunning = true;
   try {
-    await run('player-snapshot', () => syncClan(true));
+    await run('player-snapshot', async () => ({ clanSnapshot: await syncClan(true), capitalContributions: await syncCapitalContributionSnapshots() }));
   } finally {
     syncRunning = false;
     if (pendingPlayerSnapshot) void flushPendingPlayerSnapshot();
