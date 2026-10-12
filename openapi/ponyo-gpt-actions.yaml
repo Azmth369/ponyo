@@ -23,6 +23,12 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                additionalProperties: true
   /api/v1/clan/activity:
     get:
       operationId: getClanPlayerActivity
@@ -34,6 +40,12 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                additionalProperties: true
   /api/v1/clan/summary:
     get:
       operationId: getClanSummary
@@ -45,6 +57,12 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                additionalProperties: true
   /api/v1/clan/members:
     get:
       operationId: getClanMembers
@@ -70,6 +88,12 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                additionalProperties: true
   /api/v1/war/current:
     get:
       operationId: getCurrentWar
@@ -81,6 +105,12 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                additionalProperties: true
   /api/v1/war/history:
     get:
       operationId: getWarHistory
@@ -98,6 +128,12 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                additionalProperties: true
   /api/v1/capital-raids/latest:
     get:
       operationId: getLatestCapitalRaid
@@ -109,6 +145,12 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                additionalProperties: true
   /api/v1/sync/status:
     get:
       operationId: getSyncStatus
@@ -120,6 +162,12 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                additionalProperties: true
   /api/v1/sync/refresh:
     post:
       operationId: refreshClashOfClansData
@@ -132,5 +180,11 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                additionalProperties: true
         '409':
           description: A sync is already running
