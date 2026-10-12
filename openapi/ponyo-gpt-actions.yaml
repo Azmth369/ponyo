@@ -58,6 +58,44 @@ paths:
           description: Missing player parameter
         '404':
           description: No matching player; a player tag can be supplied
+  /api/v1/clan/capital-contribution-activity:
+    get:
+      operationId: getCapitalContributionActivity
+      summary: Find Clan Capital contribution increases since the last raid ended
+      description: Compares stored lifetime clanCapitalContributions player-profile snapshots using the latest stored Capital Raid Weekend end time as the baseline. This is not raid loot. Results require contribution snapshots both at or before the raid end and after it.
+      responses:
+        '200':
+          description: Contribution changes since raid end
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  clanTag: { type: string }
+                  raidSeasonId: { type: [string, 'null'] }
+                  raidEndedAt: { type: [string, 'null'] }
+                  baselineRule: { type: string }
+                  comparisonRule: { type: string }
+                  snapshotCount: { type: integer }
+                  matchedPlayers: { type: integer }
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        playerTag: { type: string }
+                        name: { type: string }
+                        contributionAtRaidEnd: { type: [integer, 'null'] }
+                        contributionNow: { type: integer }
+                        contributionIncrease: { type: [integer, 'null'] }
+                        counterDecreased: { type: boolean }
+                        baselineAt: { type: [string, 'null'] }
+                        comparisonAt: { type: string }
+                        baselineMissing: { type: boolean }
+                      additionalProperties: true
+                  source: { type: string }
+                  note: { type: string }
+                additionalProperties: true
   /api/v1/clan/activity:
     get:
       operationId: getClanPlayerActivity
