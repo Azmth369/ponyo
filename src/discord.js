@@ -303,13 +303,18 @@ async function sendPonyoAlert({ interaction, provider, question, error, classifi
 client.once('clientReady', readyClient => console.log(`Discord bot online as ${readyClient.user.tag}`));
 
 async function handleAiCommand(interaction, provider, generator) {
-  // Ephemeral (private) reply: only the asking user sees the answer.
-  // Note: Discord does not allow pinning or forwarding ephemeral messages.
-  await interaction.deferReply({ ephemeral: true });
   const started = Date.now();
   let question = '';
+  let acknowledged = false;
+
+  console.log(`[discord] /${interaction.commandName} received user=${interaction.user?.id || 'unknown'} guild=${interaction.guildId || 'DM'} channel=${interaction.channelId || 'unknown'} at=${formatISTTimestamp()}`);
+
   try {
+    // Acknowledge immediately so Discord's 3-second interaction deadline is met.
+    await interaction.deferReply({ ephemeral: true });
+    acknowledged = true;
     question = interaction.options.getString('question', true).trim();
+    console.log(`[discord] / ${interaction.commandName} acknowledged provider=${provider} questionLength=${question.length}`);
     const key = memoryKey(interaction);
 
     let turns;
@@ -390,13 +395,26 @@ async function handleAiCommand(interaction, provider, generator) {
   } catch (error) {
     const elapsed = ((Date.now() - started) / 1000).toFixed(1);
     const classification = classifyProviderError(provider, error);
-    console.error(`[discord] ${provider.toLowerCase()} failed`, error);
-    await sendPonyoAlert({ interaction, provider, question, error, classification, elapsed });
-    await interaction.editReply(classification.userMessage);
+    console.error(`[discord] / ${interaction.commandName} failed provider=${provider} acknowledged=${acknowledged} elapsed=${elapsed}s`, error);
+    await sendPonyoAlert({ interaction, provider, question, error, classification, elapsed }).catch(alertError => {
+      console.error('[discord] failed to send provider alert', alertError);
+    });
+
+    try {
+      if (interaction.deferred || interaction.replied || acknowledged) {
+        await interaction.editReply({ content: classification.userMessage, components: [] });
+      } else if (!interaction.replied) {
+        await interaction.reply({ content: classification.userMessage, ephemeral: true });
+      }
+    } catch (replyError) {
+      console.error(`[discord] could not send failure response for /${interaction.commandName}`, replyError);
+    }
   }
 }
 
 client.on('interactionCreate', async interaction => {
+  console.log(`[discord] interaction received type=${interaction.type} command=${interaction.commandName || 'none'} customId=${interaction.customId || 'none'}`);
+
   if (interaction.isChatInputCommand()) {
     if (interaction.commandName === 'ask') {
       await handleAiCommand(interaction, 'Sarvam', answer);
@@ -445,6 +463,8 @@ client.on('interactionCreate', async interaction => {
     content: pageContent(saved.provider, '—', chunks, page),
     components: chunks.length > 1 ? [viewerRow(id, page, chunks.length)] : []
   });
+}).catch(error => {
+  console.error('[discord] uncaught interactionCreate handler error', error);
 });
 
 setInterval(() => {
