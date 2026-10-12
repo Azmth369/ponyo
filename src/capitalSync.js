@@ -146,16 +146,55 @@ export async function syncCapital() {
       data: member
     }));
 
-    // As with attacks, an omitted members array is not proof that the season
-    // had no participants. Preserve previously collected details in that case.
+    // Prefer authoritative per-member weekend totals whenever the API provides
+    // raid.members. For older seasons without members, derive only what the
+    // attack log proves: player identity and number of logged attacks. Do not
+    // invent per-player loot or claim the derived rows are complete.
     if (members.length > 0) {
       const removedParticipants = await db.from('capital_raid_participants').delete().eq('capital_raid_uid', seasonId);
       if (removedParticipants.error) throw removedParticipants.error;
       await upsert('capital_raid_participants', participantRows);
       participants += participantRows.length;
     } else {
-      preservedParticipantHistory += 1;
-      console.warn(`[capital] ${seasonId}: API returned no member details; preserving stored participant history`);
+      const derived = new Map();
+      for (const attack of attackRows) {
+        const tag = attack.attacker_id;
+        if (!tag) continue;
+        const existing = derived.get(tag) ?? {
+          capital_raid_uid: seasonId,
+          player_name: attack.attacker_name ?? null,
+          player_id: tag,
+          attacks_used: 0,
+          attacks_available: null,
+          total_loot_gained: null,
+          capital_raid_attack_uid: null,
+          capital_raid_start: start,
+          capital_raid_end: end,
+          data: { derivedFromAttackLog: true, completeness: 'partial' }
+        };
+        existing.attacks_used += 1;
+        derived.set(tag, existing);
+      }
+      const derivedRows = [...derived.values()];
+      if (derivedRows.length) {
+        // Preserve authoritative rows and only add missing players. Unknown
+        // loot remains null instead of being written as a misleading zero.
+        const { data: existingRows, error: existingError } = await db
+          .from('capital_raid_participants')
+          .select('player_id')
+          .eq('capital_raid_uid', seasonId);
+        if (existingError) throw existingError;
+        const known = new Set((existingRows ?? []).map(row => row.player_id));
+        const missingRows = derivedRows.filter(row => !known.has(row.player_id));
+        if (missingRows.length) {
+          await upsert('capital_raid_participants', missingRows);
+          participants += missingRows.length;
+        }
+        console.warn(`[capital] ${seasonId}: API omitted members; derived ${derivedRows.length} partial participant rows from attack logs, inserted ${missingRows.length}`);
+      } else {
+        preservedParticipantHistory += 1;
+        console.warn(`[capital] ${seasonId}: API returned no member details and no usable attack log; preserving stored participant history`);
+      }
     }
 
     seasons += 1;
