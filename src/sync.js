@@ -119,7 +119,7 @@ async function latestSnapshotBatch() {
 
 // Keep only the N most recent snapshot batches (default 12, per the database
 // design notes; override with SNAPSHOT_KEEP_BATCHES).
-export async function trimSnapshots(keep = Number(process.env.SNAPSHOT_KEEP_BATCHES ?? 12)) {
+export async function trimSnapshots(keep = Number(process.env.SNAPSHOT_KEEP_BATCHES ?? 120)) {
   const { data, error } = await db
     .from('clan_info_snap')
     .select('date_time')
