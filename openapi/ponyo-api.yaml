@@ -1,8 +1,8 @@
-openapi: 3.0.3
+openapi: 3.1.0
 info:
   title: Ponyo Clash of Clans API
-  version: 1.0.3
-  description: Access synced Clash of Clans data from Ponyo. Refresh only when explicitly requested.
+  version: 1.0.5
+  description: Read clan roster, activity estimates, war history, Capital Raid data, player contribution, and sync status. Refresh only when explicitly requested.
 servers:
   - url: https://ponyo-v845.onrender.com
 paths:
@@ -10,161 +10,140 @@ paths:
     get:
       operationId: getPlayerCapitalContribution
       summary: Get a player's lifetime Clan Capital contribution
-      description: Use this endpoint when asked for a player's total Capital contribution or contribution reputation. Prefer the player's exact player tag when available: tags are looked up directly against the live player profile and do not need to be in the current clan roster. Names are matched against current clan members and stored Capital Raid participants. This is the lifetime clanCapitalContributions statistic from the live profile, not total loot gained in a single Capital Raid Weekend.
+      description: Use the exact player tag when available. This is lifetime clanCapitalContributions, not loot gained in one raid weekend. Name lookups can return ambiguous matches.
       parameters:
-        - in: query
-          name: player
+        - name: player
+          in: query
           required: true
-          description: Exact player tag (recommended; works even if the player is no longer in the current clan) or player name. If multiple names match, the response lists candidates to disambiguate.
+          description: Player tag or player name
           schema:
             type: string
       responses:
         '200':
-          description: Player lifetime contribution or ambiguous matches
+          description: Player contribution or ambiguous matches
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   data:
-                    type: object
-                    nullable: true
-                    properties:
-                      name:
-                        type: string
-                      playerTag:
-                        type: string
-                      clanName:
-                        type: string
-                      townHallLevel:
-                        type: integer
-                      totalClanCapitalContribution:
-                        type: integer
-                    additionalProperties: true
-                  metric:
-                    type: string
-                  source:
-                    type: string
-                  checkedAt:
-                    type: string
-                  note:
-                    type: string
-                  ambiguous:
-                    type: boolean
-                  message:
-                    type: string
+                    anyOf:
+                      - type: object
+                        properties:
+                          name: { type: string }
+                          playerTag: { type: string }
+                          clanName: { type: [string, 'null'] }
+                          townHallLevel: { type: [integer, 'null'] }
+                          totalClanCapitalContribution: { type: integer }
+                        additionalProperties: true
+                      - type: 'null'
+                  metric: { type: string }
+                  source: { type: string }
+                  checkedAt: { type: string }
+                  note: { type: string }
+                  ambiguous: { type: boolean }
+                  message: { type: string }
                   matches:
                     type: array
                     items:
                       type: object
                       properties:
-                        name:
-                          type: string
-                        playerTag:
-                          type: string
-                        townHallLevel:
-                          type: integer
+                        name: { type: string }
+                        playerTag: { type: string }
+                        townHallLevel: { type: integer }
                       additionalProperties: true
+                  error: { type: string }
                 additionalProperties: true
         '400':
           description: Missing player parameter
         '404':
-          description: No current clan member matched
+          description: No matching player; a player tag can be supplied
   /api/v1/clan/activity:
     get:
       operationId: getClanPlayerActivity
       summary: Get inferred last observed activity for clan members
-      description: Returns each current clan member's latest stored activity timestamp inferred from snapshot changes. This is not an exact last-login time. It is estimated from changes in trophies, XP level, Town Hall level, troops donated, or troops received. Trophy changes alone can result from defensive battles. If no activity timestamp exists, more successful snapshots are needed.
+      description: Activity is inferred from changes in trophies, XP, Town Hall level, or donation counters between snapshots. This is not an exact last-login timestamp. Requires recurring snapshots for useful history.
       responses:
         '200':
-          description: Clan member activity report
+          description: Activity report for the current live clan roster
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  clanName:
-                    type: string
-                  clanTag:
-                    type: string
-                  count:
-                    type: integer
-                  generatedAt:
-                    type: string
-                  note:
-                    type: string
+                  clanName: { type: string }
+                  clanTag: { type: string }
+                  count: { type: integer }
+                  source: { type: string }
+                  generatedAt: { type: string }
+                  note: { type: string }
                   data:
                     type: array
                     items:
                       type: object
                       properties:
-                        playerTag:
-                          type: string
-                        name:
-                          type: string
-                        role:
-                          type: string
-                        townHallLevel:
-                          type: integer
-                        xpLevel:
-                          type: integer
-                        trophies:
-                          type: integer
-                        troopsDonated:
-                          type: integer
-                        troopsReceived:
-                          type: integer
-                        lastObservedActivityAt:
-                          type: string
-                          nullable: true
-                        lastCheckedAt:
-                          type: string
-                          nullable: true
-                        activityStatus:
-                          type: string
-                        interpretation:
-                          type: string
+                        playerTag: { type: string }
+                        name: { type: string }
+                        role: { type: [string, 'null'] }
+                        townHallLevel: { type: [integer, 'null'] }
+                        xpLevel: { type: [integer, 'null'] }
+                        trophies: { type: [integer, 'null'] }
+                        troopsDonated: { type: [integer, 'null'] }
+                        troopsReceived: { type: [integer, 'null'] }
+                        lastObservedActivityAt: { type: [string, 'null'] }
+                        lastCheckedAt: { type: [string, 'null'] }
+                        activityStatus: { type: string }
+                        interpretation: { type: string }
                       additionalProperties: true
                 additionalProperties: true
   /api/v1/clan/summary:
     get:
       operationId: getClanSummary
-      summary: Get clan roster summary
+      summary: Get live clan roster summary
       responses:
         '200':
-          description: Clan summary
+          description: Summary calculated from the live roster
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  ok:
-                    type: boolean
+                  source: { type: string }
                   data:
                     type: object
                     properties:
-                      ok:
-                        type: boolean
+                      clanName: { type: string }
+                      clanTag: { type: string }
+                      members: { type: integer }
+                      totalDonations: { type: integer }
+                      totalReceived: { type: integer }
+                      averageTrophies: { type: integer }
+                      townHallCounts:
+                        type: object
+                        additionalProperties: { type: integer }
+                      roles:
+                        type: object
+                        additionalProperties: { type: integer }
+                      generatedAt: { type: string }
                     additionalProperties: true
-                  error:
-                    type: string
+                  error: { type: string }
                 additionalProperties: true
   /api/v1/clan/members:
     get:
       operationId: getClanMembers
-      summary: List clan members or search by player name
-      description: For questions about the full clan roster, request limit=100. The response includes totalMembers for the actual live roster size and count for records returned. Use search to find a specific player without fetching the full roster.
+      summary: List or search live clan members
+      description: For the full roster use limit=100. totalMembers is the live roster size; count is the number returned.
       parameters:
-        - in: query
-          name: search
+        - name: search
+          in: query
           required: false
-          description: Optional player-name search.
+          description: Optional partial player-name search
           schema:
             type: string
-        - in: query
-          name: limit
+        - name: limit
+          in: query
           required: false
-          description: Number of records to return. Use 100 to retrieve the full roster (maximum 100).
+          description: Maximum records to return, up to 100
           schema:
             type: integer
             minimum: 1
@@ -172,97 +151,135 @@ paths:
             default: 100
       responses:
         '200':
-          description: Clan member records
+          description: Live roster records
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  ok:
-                    type: boolean
                   data:
-                    type: object
-                    properties:
-                      ok:
-                        type: boolean
-                    additionalProperties: true
-                  error:
-                    type: string
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        player_id: { type: string }
+                        name: { type: string }
+                        role: { type: [string, 'null'] }
+                        th: { type: [integer, 'null'] }
+                        lvl: { type: [integer, 'null'] }
+                        trophies: { type: [integer, 'null'] }
+                        troops_donated: { type: [integer, 'null'] }
+                        troops_received: { type: [integer, 'null'] }
+                      additionalProperties: true
+                  count: { type: integer }
+                  totalMembers: { type: integer }
+                  filteredMembers: { type: integer }
+                  limit: { type: integer }
+                  source: { type: string }
+                  clanName: { type: string }
+                  refreshedAt: { type: string }
                 additionalProperties: true
   /api/v1/war/current:
     get:
       operationId: getCurrentWar
-      summary: Get latest synced war, participants, and attacks
+      summary: Get current live war status and details
       responses:
         '200':
-          description: Current war data
+          description: Live current-war result
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  ok:
-                    type: boolean
                   data:
                     type: object
                     properties:
-                      ok:
-                        type: boolean
+                      state: { type: string }
+                      teamSize: { type: integer }
+                      preparationStartTime: { type: string }
+                      startTime: { type: string }
+                      endTime: { type: string }
+                      clan: { type: object, additionalProperties: true }
+                      opponent: { type: object, additionalProperties: true }
                     additionalProperties: true
-                  error:
-                    type: string
+                  source: { type: string }
+                  checkedAt: { type: string }
+                  isLive: { type: boolean }
+                  error: { type: string }
                 additionalProperties: true
   /api/v1/war/history:
     get:
       operationId: getWarHistory
-      summary: List recent synced wars
+      summary: List recent stored wars
       parameters:
-        - in: query
-          name: limit
+        - name: limit
+          in: query
           required: false
+          description: Number of recent wars to return, maximum 50
           schema:
             type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
       responses:
         '200':
-          description: War history
+          description: Recent stored war summaries
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  ok:
-                    type: boolean
                   data:
-                    type: object
-                    properties:
-                      ok:
-                        type: boolean
-                    additionalProperties: true
-                  error:
-                    type: string
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        cw_uid: { type: string }
+                        opponent_clan_name: { type: [string, 'null'] }
+                        opponent_clan_id: { type: [string, 'null'] }
+                        size: { type: [integer, 'null'] }
+                        battle_start: { type: [string, 'null'] }
+                        battle_end: { type: [string, 'null'] }
+                        result: { type: [string, 'null'] }
+                        our_clan_score: { type: [integer, 'null'] }
+                        opponent_clan_score: { type: [integer, 'null'] }
+                        our_clan_destruction: { type: [number, 'null'] }
+                        opponent_clan_destruction: { type: [number, 'null'] }
+                      additionalProperties: true
+                  count: { type: integer }
+                  source: { type: string }
                 additionalProperties: true
   /api/v1/capital-raids/latest:
     get:
       operationId: getLatestCapitalRaid
-      summary: Get latest Capital Raid Weekend and participants
+      summary: Get latest stored Capital Raid Weekend and participants
       responses:
         '200':
-          description: Latest raid data
+          description: Latest stored raid season and participant records, or no stored season
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  ok:
-                    type: boolean
                   data:
-                    type: object
-                    properties:
-                      ok:
-                        type: boolean
-                    additionalProperties: true
-                  error:
-                    type: string
+                    anyOf:
+                      - type: object
+                        properties:
+                          season: { type: object, additionalProperties: true }
+                          participants:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                player_name: { type: string }
+                                player_id: { type: [string, 'null'] }
+                                attacks_used: { type: [integer, 'null'] }
+                                attacks_available: { type: [integer, 'null'] }
+                                total_loot_gained: { type: [integer, 'null'] }
+                              additionalProperties: true
+                        additionalProperties: true
+                      - type: 'null'
+                  source: { type: string }
                 additionalProperties: true
   /api/v1/sync/status:
     get:
@@ -270,46 +287,44 @@ paths:
       summary: Get recent sync outcomes
       responses:
         '200':
-          description: Sync status
+          description: Up to 30 most recent sync run records
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  ok:
-                    type: boolean
                   data:
-                    type: object
-                    properties:
-                      ok:
-                        type: boolean
-                    additionalProperties: true
-                  error:
-                    type: string
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        job: { type: string }
+                        status: { type: string }
+                        details: {}
+                        message: { type: [string, 'null'] }
+                        started_at: { type: [string, 'null'] }
+                        finished_at: { type: [string, 'null'] }
+                      additionalProperties: true
                 additionalProperties: true
   /api/v1/sync/refresh:
     post:
       operationId: refreshClashOfClansData
       summary: Refresh supported Clash of Clans datasets
-      description: Call only when the user explicitly asks to refresh the data.
+      description: Call only when the user explicitly asks to refresh data. A refresh may return 409 when another sync is running.
       responses:
         '200':
-          description: Refresh results
+          description: Manual refresh results
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  ok:
-                    type: boolean
-                  data:
+                  busy: { type: boolean }
+                  completedAt: { type: string }
+                  results:
                     type: object
-                    properties:
-                      ok:
-                        type: boolean
-                    additionalProperties: true
-                  error:
-                    type: string
+                    additionalProperties: {}
+                  message: { type: string }
                 additionalProperties: true
         '409':
           description: A sync is already running
@@ -318,8 +333,6 @@ paths:
               schema:
                 type: object
                 properties:
-                  ok:
-                    type: boolean
-                  error:
-                    type: string
+                  busy: { type: boolean }
+                  message: { type: string }
                 additionalProperties: true
