@@ -1,5 +1,5 @@
 import { db } from './db.js';
-import { getCurrentWar as fetchCurrentWar } from './cocApi.js';
+import { getClan as fetchClan, getCurrentWar as fetchCurrentWar } from './cocApi.js';
 import { refreshNow } from './index.js';
 
 const send = (res, status, body) => {
@@ -40,28 +40,53 @@ export async function handleApi(req, res, url) {
 
   try {
     if (req.method === 'GET' && url.pathname === '/api/v1/clan/members') {
+      // Use the live clan roster so old members left in the database cannot
+      // inflate the roster or appear as current members.
+      const clan = await fetchClan();
+      const roster = (clan.memberList ?? []).map(m => ({
+        player_id: m.tag,
+        name: m.name,
+        role: m.role ?? null,
+        th: m.townHallLevel ?? null,
+        lvl: m.expLevel ?? null,
+        trophies: m.trophies ?? null,
+        troops_donated: m.donations ?? null,
+        troops_received: m.donationsReceived ?? null
+      }));
+      const search = (url.searchParams.get('search') ?? '').trim().slice(0, 80).toLowerCase();
+      const filtered = search ? roster.filter(m => m.name.toLowerCase().includes(search)) : roster;
+      filtered.sort((a, b) => a.name.localeCompare(b.name));
       const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit')) || 100));
-      const search = (url.searchParams.get('search') ?? '').trim().slice(0, 80);
-      let q = db.from('clan_info')
-        .select('player_id,name,role,th,lvl,trophies,troops_donated,troops_received,last_active,date_time')
-        .order('name', { ascending: true }).limit(limit);
-      if (search) q = q.ilike('name', '%' + search.replace(/[%,()]/g, '') + '%');
-      const data = await rows(q);
-      send(res, 200, { data, count: data.length, source: 'supabase', refreshedAt: data[0]?.date_time ?? null });
+      const data = filtered.slice(0, limit);
+      send(res, 200, {
+        data,
+        count: data.length,
+        totalMembers: roster.length,
+        filteredMembers: filtered.length,
+        limit,
+        source: 'clash_of_clans_api',
+        clanName: clan.name,
+        refreshedAt: new Date().toISOString()
+      });
       return true;
     }
 
     if (req.method === 'GET' && url.pathname === '/api/v1/clan/summary') {
-      const members = await rows(db.from('clan_info').select('player_id,role,th,trophies,troops_donated,troops_received'));
+      // Derive all headline figures from the same live roster as getClanMembers.
+      const clan = await fetchClan();
+      const members = clan.memberList ?? [];
       const summary = {
+        clanName: clan.name,
+        clanTag: clan.tag,
         members: members.length,
-        totalDonations: members.reduce((n, m) => n + (Number(m.troops_donated) || 0), 0),
-        totalReceived: members.reduce((n, m) => n + (Number(m.troops_received) || 0), 0),
+        totalDonations: members.reduce((n, m) => n + (Number(m.donations) || 0), 0),
+        totalReceived: members.reduce((n, m) => n + (Number(m.donationsReceived) || 0), 0),
         averageTrophies: members.length ? Math.round(members.reduce((n, m) => n + (Number(m.trophies) || 0), 0) / members.length) : 0,
-        townHallCounts: members.reduce((o, m) => { const k = String(m.th ?? 'unknown'); o[k] = (o[k] || 0) + 1; return o; }, {}),
-        roles: members.reduce((o, m) => { const k = m.role ?? 'unknown'; o[k] = (o[k] || 0) + 1; return o; }, {})
+        townHallCounts: members.reduce((o, m) => { const k = String(m.townHallLevel ?? 'unknown'); o[k] = (o[k] || 0) + 1; return o; }, {}),
+        roles: members.reduce((o, m) => { const k = m.role ?? 'unknown'; o[k] = (o[k] || 0) + 1; return o; }, {}),
+        generatedAt: new Date().toISOString()
       };
-      send(res, 200, { data: summary, source: 'supabase', generatedAt: new Date().toISOString() });
+      send(res, 200, { data: summary, source: 'clash_of_clans_api' });
       return true;
     }
 
