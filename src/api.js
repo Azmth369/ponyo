@@ -90,10 +90,10 @@ export async function handleApi(req, res, url) {
         m.tag.toLowerCase().replace(/^#/, '').includes(normalized)
       );
 
-      if (!matches.length) {
-        send(res, 404, { error: 'No current clan member matched that player name or tag.', clanName: clan.name });
-        return true;
-      }
+      let playerTag = null;
+      let matchedName = null;
+      let townHallLevel = null;
+
       if (matches.length > 1) {
         send(res, 200, {
           data: null,
@@ -104,12 +104,50 @@ export async function handleApi(req, res, url) {
         return true;
       }
 
-      const member = matches[0];
-      const player = await fetchPlayer(member.tag);
+      if (matches.length === 1) {
+        playerTag = matches[0].tag;
+        matchedName = matches[0].name;
+        townHallLevel = matches[0].townHallLevel ?? null;
+      } else {
+        // The player may have left the clan after appearing in a stored raid.
+        // Use the stored player tag only as a lookup fallback; the live player
+        // profile remains the source of truth for lifetime contribution.
+        const historical = await rows(
+          db.from('capital_raid_participants')
+            .select('player_name,player_id')
+            .ilike('player_name', search)
+            .not('player_id', 'is', null)
+            .order('player_name', { ascending: true })
+            .limit(20)
+        );
+        const unique = [...new Map(historical
+          .filter(p => p.player_id)
+          .map(p => [String(p.player_id).toUpperCase(), p])).values()];
+        if (unique.length === 1) {
+          playerTag = unique[0].player_id;
+          matchedName = unique[0].player_name;
+        } else if (unique.length > 1) {
+          send(res, 200, {
+            data: null,
+            ambiguous: true,
+            message: 'Multiple stored raid participants matched. Ask the user for the player tag.',
+            matches: unique.map(p => ({ name: p.player_name, playerTag: p.player_id }))
+          });
+          return true;
+        } else {
+          send(res, 404, {
+            error: 'No current clan member or stored raid participant matched that player name. Provide the player tag.',
+            clanName: clan.name
+          });
+          return true;
+        }
+      }
+
+      const player = await fetchPlayer(playerTag);
       send(res, 200, {
         data: {
-          name: player.name,
-          playerTag: player.tag,
+          name: player.name ?? matchedName,
+          playerTag: player.tag ?? playerTag,
           clanName: player.clan?.name ?? clan.name,
           townHallLevel: player.townHallLevel,
           totalClanCapitalContribution: Number(player.clanCapitalContributions ?? 0)
