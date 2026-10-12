@@ -27,6 +27,46 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  data:
+                    type: object
+                    nullable: true
+                    properties:
+                      name:
+                        type: string
+                      playerTag:
+                        type: string
+                      clanName:
+                        type: string
+                      townHallLevel:
+                        type: integer
+                      totalClanCapitalContribution:
+                        type: integer
+                    additionalProperties: true
+                  metric:
+                    type: string
+                  source:
+                    type: string
+                  checkedAt:
+                    type: string
+                  note:
+                    type: string
+                  ambiguous:
+                    type: boolean
+                  message:
+                    type: string
+                  matches:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        playerTag:
+                          type: string
+                        townHallLevel:
+                          type: integer
+                      additionalProperties: true
                 additionalProperties: true
         '400':
           description: Missing player parameter
