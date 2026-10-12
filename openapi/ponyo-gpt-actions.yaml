@@ -210,7 +210,8 @@ paths:
   /api/v1/war/history:
     get:
       operationId: getWarHistory
-      summary: List recent stored wars
+      summary: List recent stored regular Clan Wars (not CWL rounds)
+      description: This endpoint reads cw_session and returns regular Clan War history only. Use CWL history separately; invalid stored destruction percentages are returned as null.
       parameters:
         - name: limit
           in: query
@@ -248,6 +249,8 @@ paths:
                       additionalProperties: true
                   count: { type: integer }
                   source: { type: string }
+                  warType: { type: string, description: Always regular_clan_war for this endpoint }
+                  note: { type: string }
                 additionalProperties: true
   /api/v1/capital-raids/latest:
     get:
