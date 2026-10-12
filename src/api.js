@@ -257,8 +257,25 @@ export async function handleApi(req, res, url) {
 
     if (req.method === 'GET' && url.pathname === '/api/v1/war/history') {
       const limit = Math.min(50, Math.max(1, Number(url.searchParams.get('limit')) || 10));
-      const data = await rows(db.from('cw_session').select('cw_uid,opponent_clan_name,opponent_clan_id,size,battle_start,battle_end,result,our_clan_score,opponent_clan_score,our_clan_destruction,opponent_clan_destruction').order('battle_start', { ascending: false }).limit(limit));
-      send(res, 200, { data, count: data.length, source: 'supabase' });
+      const stored = await rows(db.from('cw_session').select('cw_uid,opponent_clan_name,opponent_clan_id,size,battle_start,battle_end,result,our_clan_score,opponent_clan_score,our_clan_destruction,opponent_clan_destruction').order('battle_start', { ascending: false }).limit(limit));
+      // This endpoint reads cw_session only: these are regular Clan War records,
+      // not CWL rounds. Older rows may contain invalid destruction values; never
+      // present a value outside the API's 0-100 percentage range as a percentage.
+      const data = stored.map(war => ({
+        ...war,
+        warType: 'Clan War',
+        our_clan_destruction: Number.isFinite(Number(war.our_clan_destruction)) &&
+          Number(war.our_clan_destruction) >= 0 && Number(war.our_clan_destruction) <= 100
+          ? Number(war.our_clan_destruction) : null,
+        opponent_clan_destruction: Number.isFinite(Number(war.opponent_clan_destruction)) &&
+          Number(war.opponent_clan_destruction) >= 0 && Number(war.opponent_clan_destruction) <= 100
+          ? Number(war.opponent_clan_destruction) : null
+      }));
+      send(res, 200, {
+        data, count: data.length, source: 'supabase',
+        warType: 'regular_clan_war',
+        note: 'This endpoint returns regular Clan War history from cw_session, not Clan War League (CWL) rounds. Invalid stored destruction percentages are returned as null.'
+      });
       return true;
     }
 
