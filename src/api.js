@@ -277,6 +277,25 @@ export async function handleApi(req, res, url) {
         if (snap.date_time <= cutoff && !baselineByTag.has(snap.player_id)) baselineByTag.set(snap.player_id, snap);
       }
 
+      // Join lifetime Clan Capital contribution snapshots to the same activity window.
+      const contributionSnapshots = await rows(
+        db.from('player_capital_contribution_snap')
+          .select('player_tag,player_name,contribution,observed_at')
+          .eq('clan_tag', clan.tag)
+          .order('observed_at', { ascending: false })
+          .limit(6000)
+      );
+      const contributionBaselineByTag = new Map();
+      const contributionLatestByTag = new Map();
+      for (const snap of contributionSnapshots) {
+        const tag = String(snap.player_tag ?? '').replace(/^#/, '').toUpperCase();
+        const time = new Date(snap.observed_at).getTime();
+        if (!tag || !Number.isFinite(time)) continue;
+        if (time <= new Date(cutoff).getTime() && !contributionBaselineByTag.has(tag)) contributionBaselineByTag.set(tag, snap);
+        if (!contributionLatestByTag.has(tag)) contributionLatestByTag.set(tag, snap);
+      }
+      const normalizePlayerTag = value => String(value ?? '').replace(/^#/, '').toUpperCase();
+
       const activityRows = roster.map(member => {
         const baseline = baselineByTag.get(member.tag);
         const donationsNow = Number(member.donations ?? 0);
@@ -289,6 +308,11 @@ export async function handleApi(req, res, url) {
         const previousTh = baseline?.th == null ? null : Number(baseline.th);
         const currentTh = member.townHallLevel ?? null;
         const upgraded = previousTh != null && currentTh != null && Number(currentTh) > previousTh;
+        const contributionBaseline = contributionBaselineByTag.get(normalizePlayerTag(member.tag));
+        const contributionLatest = contributionLatestByTag.get(normalizePlayerTag(member.tag));
+        const contributionBaselineValue = contributionBaseline?.contribution == null ? null : Number(contributionBaseline.contribution);
+        const contributionCurrentValue = contributionLatest?.contribution == null ? null : Number(contributionLatest.contribution);
+        const contributionDelta = contributionBaselineValue != null && contributionCurrentValue != null ? contributionCurrentValue - contributionBaselineValue : null;
         return {
           playerTag: member.tag,
           name: member.name,
@@ -303,6 +327,13 @@ export async function handleApi(req, res, url) {
           previousReceived: previousReceived,
           currentReceived: receivedNow,
           receivedInWindow: receivedIncrease,
+          lifetimeClanCapitalContributionAtWindowStart: contributionBaselineValue,
+          lifetimeClanCapitalContributionNow: contributionCurrentValue,
+          contributionIncreaseInWindow: contributionDelta != null && contributionDelta >= 0 ? contributionDelta : null,
+          contributionCounterDecreased: contributionDelta != null && contributionDelta < 0,
+          contributionBaselineAt: contributionBaseline?.observed_at ?? null,
+          contributionComparisonAt: contributionLatest?.observed_at ?? null,
+          contributionBaselineMissing: !contributionBaseline,
           donationCounterReset,
           baselineSnapshotAt: baseline?.date_time ?? null,
           lastObservedActivityAt: null,
@@ -319,6 +350,10 @@ export async function handleApi(req, res, url) {
       const recipients = activityRows
         .filter(row => row.receivedInWindow != null && row.receivedInWindow > 0)
         .sort((a, b) => b.receivedInWindow - a.receivedInWindow);
+      const capitalContributors = activityRows
+        .filter(row => row.contributionIncreaseInWindow != null && row.contributionIncreaseInWindow > 0)
+        .sort((a, b) => b.contributionIncreaseInWindow - a.contributionIncreaseInWindow);
+      const capitalContributionCoverage = activityRows.filter(row => row.contributionBaselineAt).length;
       const covered = activityRows.filter(row => row.baselineSnapshotAt).length;
       const latestSnapshotAgeHours = latestSnapshotTime
         ? Math.round((Date.now() - new Date(latestSnapshotTime).getTime()) / 3600000 * 10) / 10
@@ -340,11 +375,17 @@ export async function handleApi(req, res, url) {
         townHallUpgrades: upgrades,
         donationLeaders: donors,
         receivedLeaders: recipients,
+        capitalContributionLeaders: capitalContributors,
+        capitalContributionCoverage: {
+          membersWithBaseline: capitalContributionCoverage,
+          currentMembers: roster.length,
+          latestSnapshotAt: contributionSnapshots[0]?.observed_at ?? null
+        },
         data: activityRows,
         count: activityRows.length,
         source: 'clash_of_clans_api_plus_snapshots',
         generatedAt: new Date().toISOString(),
-        note: 'Window metrics compare the current live roster with the latest stored snapshot at or before the window start. Results are only as precise as snapshot coverage. Donation counters may reset; rows with resets or no baseline have null deltas. Town Hall upgrades are detected only when the baseline and current Town Hall levels differ.'
+        note: 'Window metrics compare the current live roster with the latest stored snapshot at or before the window start. Clan Capital contribution deltas use lifetime player-profile contribution snapshots and require a baseline at or before the window start and a later snapshot. Results are only as precise as snapshot coverage. Donation counters may reset; rows with resets or no baseline have null deltas. Town Hall upgrades are detected only when the baseline and current Town Hall levels differ. Observed statistic changes do not prove exact login times.'
       });
       return true;
     }
