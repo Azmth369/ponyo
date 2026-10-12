@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: Ponyo Clash of Clans API
-  version: 1.0.1
-  description: Read-only access to existing Ponyo Supabase data, plus an explicit manual refresh action. Clash of Clans and Supabase credentials remain on Render.
+  version: 1.0.2
+  description: Access synced Clash of Clans data from Ponyo. Manual refresh runs only when explicitly requested.
 servers:
   - url: https://ponyo-v845.onrender.com
 security:
@@ -14,12 +14,11 @@ paths:
       summary: Get clan roster summary
       responses:
         '200':
-          description: Summary metrics for the synced clan roster
+          description: Clan summary
           content:
             application/json:
               schema:
-                type: object
-                properties: {}
+                $ref: '#/components/schemas/ApiResponse'
   /api/v1/clan/members:
     get:
       operationId: getClanMembers
@@ -40,24 +39,22 @@ paths:
             default: 100
       responses:
         '200':
-          description: Member records
+          description: Clan member records
           content:
             application/json:
               schema:
-                type: object
-                properties: {}
+                $ref: '#/components/schemas/ApiResponse'
   /api/v1/war/current:
     get:
       operationId: getCurrentWar
       summary: Get latest synced war, participants, and attacks
       responses:
         '200':
-          description: Latest stored war
+          description: Current war data
           content:
             application/json:
               schema:
-                type: object
-                properties: {}
+                $ref: '#/components/schemas/ApiResponse'
   /api/v1/war/history:
     get:
       operationId: getWarHistory
@@ -77,54 +74,61 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties: {}
+                $ref: '#/components/schemas/ApiResponse'
   /api/v1/capital-raids/latest:
     get:
       operationId: getLatestCapitalRaid
       summary: Get latest synced Capital Raid Weekend and participants
       responses:
         '200':
-          description: Latest stored raid
+          description: Latest raid data
           content:
             application/json:
               schema:
-                type: object
-                properties: {}
+                $ref: '#/components/schemas/ApiResponse'
   /api/v1/sync/status:
     get:
       operationId: getSyncStatus
       summary: Get recent scheduled and manual sync outcomes
       responses:
         '200':
-          description: Recent sync runs
+          description: Sync status records
           content:
             application/json:
               schema:
-                type: object
-                properties: {}
+                $ref: '#/components/schemas/ApiResponse'
   /api/v1/sync/refresh:
     post:
       operationId: refreshClashOfClansData
-      summary: Trigger a manual refresh from the Clash of Clans API
-      description: Fetches and stores supported datasets using the same lock as the scheduled scheduler. Only call when the user explicitly asks to refresh data.
+      summary: Refresh supported Clash of Clans datasets
+      description: Call only when the user explicitly asks to refresh data.
       responses:
         '200':
           description: Refresh results
           content:
             application/json:
               schema:
-                type: object
-                properties: {}
+                $ref: '#/components/schemas/ApiResponse'
         '409':
           description: A sync is already running
           content:
             application/json:
               schema:
-                type: object
-                properties: {}
+                $ref: '#/components/schemas/ApiResponse'
 components:
-  schemas: {}
+  schemas:
+    ApiResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          description: Whether the request succeeded
+        data:
+          description: Returned API data
+        error:
+          type: string
+          description: Error message, if any
+      additionalProperties: true
   securitySchemes:
     BearerAuth:
       type: http
