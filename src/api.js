@@ -182,43 +182,95 @@ export async function handleApi(req, res, url) {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/v1/clan/activity') {
+      const hours = Math.min(168, Math.max(1, Number(url.searchParams.get('hours')) || 24));
+      const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
       const clan = await fetchClan();
       const roster = clan.memberList ?? [];
-      const stored = await rows(
-        db.from('clan_info').select('player_id,last_active,date_time').limit(1000)
+
+      // Read enough snapshots to find a baseline at or before the requested window.
+      const snapshots = await rows(
+        db.from('clan_info_snap')
+          .select('date_time,player_id,name,th,lvl,trophies,troops_donated,troops_received')
+          .order('date_time', { ascending: false })
+          .limit(6000)
       );
-      const activityByTag = new Map(stored.map(row => [row.player_id, row]));
-      const data = roster.map(member => {
-        const record = activityByTag.get(member.tag);
+      const latestSnapshotTime = snapshots[0]?.date_time ?? null;
+      const baselineByTag = new Map();
+      const allSnapshotsByTag = new Map();
+      for (const snap of snapshots) {
+        if (!allSnapshotsByTag.has(snap.player_id)) allSnapshotsByTag.set(snap.player_id, []);
+        allSnapshotsByTag.get(snap.player_id).push(snap);
+        if (snap.date_time <= cutoff && !baselineByTag.has(snap.player_id)) baselineByTag.set(snap.player_id, snap);
+      }
+
+      const activityRows = roster.map(member => {
+        const baseline = baselineByTag.get(member.tag);
+        const donationsNow = Number(member.donations ?? 0);
+        const receivedNow = Number(member.donationsReceived ?? 0);
+        const previousDonations = baseline?.troops_donated == null ? null : Number(baseline.troops_donated);
+        const previousReceived = baseline?.troops_received == null ? null : Number(baseline.troops_received);
+        const donationCounterReset = previousDonations != null && donationsNow < previousDonations;
+        const donationIncrease = previousDonations == null || donationCounterReset ? null : donationsNow - previousDonations;
+        const receivedIncrease = previousReceived == null || receivedNow < previousReceived ? null : receivedNow - previousReceived;
+        const previousTh = baseline?.th == null ? null : Number(baseline.th);
+        const currentTh = member.townHallLevel ?? null;
+        const upgraded = previousTh != null && currentTh != null && Number(currentTh) > previousTh;
         return {
           playerTag: member.tag,
           name: member.name,
           role: member.role ?? null,
-          townHallLevel: member.townHallLevel ?? null,
-          xpLevel: member.expLevel ?? null,
-          trophies: member.trophies ?? null,
-          troopsDonated: member.donations ?? null,
-          troopsReceived: member.donationsReceived ?? null,
-          lastObservedActivityAt: record?.last_active ?? null,
-          lastCheckedAt: record?.date_time ?? null,
-          activityStatus: record?.last_active ? 'activity_observed' : 'not_enough_snapshot_history',
-          interpretation: record?.last_active
-            ? 'A tracked stat changed between snapshots at or before this time; this is not an exact last-login timestamp.'
-            : 'No tracked activity timestamp is available yet. More successful snapshots are needed.'
+          previousTownHallLevel: previousTh,
+          townHallLevel: currentTh,
+          townHallUpgradeObserved: upgraded,
+          townHallUpgradeDelta: upgraded ? Number(currentTh) - previousTh : 0,
+          previousDonations: previousDonations,
+          currentDonations: donationsNow,
+          donationsInWindow: donationIncrease,
+          previousReceived: previousReceived,
+          currentReceived: receivedNow,
+          receivedInWindow: receivedIncrease,
+          donationCounterReset,
+          baselineSnapshotAt: baseline?.date_time ?? null,
+          lastObservedActivityAt: null,
+          lastCheckedAt: latestSnapshotTime
         };
-      }).sort((x, y) => {
-        if (!x.lastObservedActivityAt) return 1;
-        if (!y.lastObservedActivityAt) return -1;
-        return y.lastObservedActivityAt.localeCompare(x.lastObservedActivityAt);
       });
+
+      const upgrades = activityRows
+        .filter(row => row.townHallUpgradeObserved)
+        .sort((a, b) => b.townHallLevel - a.townHallLevel || b.townHallUpgradeDelta - a.townHallUpgradeDelta);
+      const donors = activityRows
+        .filter(row => row.donationsInWindow != null && row.donationsInWindow > 0)
+        .sort((a, b) => b.donationsInWindow - a.donationsInWindow);
+      const recipients = activityRows
+        .filter(row => row.receivedInWindow != null && row.receivedInWindow > 0)
+        .sort((a, b) => b.receivedInWindow - a.receivedInWindow);
+      const covered = activityRows.filter(row => row.baselineSnapshotAt).length;
+      const latestSnapshotAgeHours = latestSnapshotTime
+        ? Math.round((Date.now() - new Date(latestSnapshotTime).getTime()) / 3600000 * 10) / 10
+        : null;
+
+      const storedActivity = await rows(
+        db.from('clan_info').select('player_id,last_active').limit(1000)
+      );
+      const lastActiveByTag = new Map(storedActivity.map(row => [row.player_id, row.last_active]));
+      for (const row of activityRows) row.lastObservedActivityAt = lastActiveByTag.get(row.playerTag) ?? null;
+
       send(res, 200, {
         clanName: clan.name,
         clanTag: clan.tag,
-        count: data.length,
+        windowHours: hours,
+        windowStart: cutoff,
+        windowEnd: new Date().toISOString(),
+        snapshotCoverage: { membersWithBaseline: covered, currentMembers: roster.length, latestSnapshotAt: latestSnapshotTime, latestSnapshotAgeHours },
+        townHallUpgrades: upgrades,
+        donationLeaders: donors,
+        receivedLeaders: recipients,
+        data: activityRows,
+        count: activityRows.length,
         source: 'clash_of_clans_api_plus_snapshots',
         generatedAt: new Date().toISOString(),
-        note: 'Last observed activity is inferred from changes in trophies, XP level, Town Hall level, and troop donation/received counters. Trophy changes alone can occur from defensive battles; this is not a true online timestamp.',
-        data
+        note: 'Window metrics compare the current live roster with the latest stored snapshot at or before the window start. Results are only as precise as snapshot coverage. Donation counters may reset; rows with resets or no baseline have null deltas. Town Hall upgrades are detected only when the baseline and current Town Hall levels differ.'
       });
       return true;
     }
