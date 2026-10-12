@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: Ponyo Clash of Clans API
-  version: 1.0.0
-  description: Read-only access to the user's existing Ponyo Supabase data, plus an explicit manual refresh action. Clash of Clans and Supabase credentials remain on Render.
+  version: 1.0.1
+  description: Read-only access to existing Ponyo Supabase data, plus an explicit manual refresh action. Clash of Clans and Supabase credentials remain on Render.
 servers:
   - url: https://ponyo-v845.onrender.com
 security:
@@ -19,6 +19,7 @@ paths:
             application/json:
               schema:
                 type: object
+                properties: {}
   /api/v1/clan/members:
     get:
       operationId: getClanMembers
@@ -26,10 +27,17 @@ paths:
       parameters:
         - in: query
           name: search
-          schema: { type: string }
+          required: false
+          schema:
+            type: string
         - in: query
           name: limit
-          schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 100
       responses:
         '200':
           description: Member records
@@ -37,6 +45,7 @@ paths:
             application/json:
               schema:
                 type: object
+                properties: {}
   /api/v1/war/current:
     get:
       operationId: getCurrentWar
@@ -48,6 +57,7 @@ paths:
             application/json:
               schema:
                 type: object
+                properties: {}
   /api/v1/war/history:
     get:
       operationId: getWarHistory
@@ -55,7 +65,12 @@ paths:
       parameters:
         - in: query
           name: limit
-          schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
       responses:
         '200':
           description: Recent war history
@@ -63,6 +78,7 @@ paths:
             application/json:
               schema:
                 type: object
+                properties: {}
   /api/v1/capital-raids/latest:
     get:
       operationId: getLatestCapitalRaid
@@ -74,6 +90,7 @@ paths:
             application/json:
               schema:
                 type: object
+                properties: {}
   /api/v1/sync/status:
     get:
       operationId: getSyncStatus
@@ -85,11 +102,12 @@ paths:
             application/json:
               schema:
                 type: object
+                properties: {}
   /api/v1/sync/refresh:
     post:
       operationId: refreshClashOfClansData
       summary: Trigger a manual refresh from the Clash of Clans API
-      description: Fetches and stores the existing supported datasets using the same lock as the scheduled scheduler. Only call when the user asks to refresh.
+      description: Fetches and stores supported datasets using the same lock as the scheduled scheduler. Only call when the user explicitly asks to refresh data.
       responses:
         '200':
           description: Refresh results
@@ -97,13 +115,16 @@ paths:
             application/json:
               schema:
                 type: object
+                properties: {}
         '409':
           description: A sync is already running
           content:
             application/json:
               schema:
                 type: object
+                properties: {}
 components:
+  schemas: {}
   securitySchemes:
     BearerAuth:
       type: http
