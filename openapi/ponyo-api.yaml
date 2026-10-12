@@ -1,0 +1,110 @@
+openapi: 3.1.0
+info:
+  title: Ponyo Clash of Clans API
+  version: 1.0.0
+  description: Read-only access to the user's existing Ponyo Supabase data, plus an explicit manual refresh action. Clash of Clans and Supabase credentials remain on Render.
+servers:
+  - url: https://ponyo-v845.onrender.com
+security:
+  - BearerAuth: []
+paths:
+  /api/v1/clan/summary:
+    get:
+      operationId: getClanSummary
+      summary: Get clan roster summary
+      responses:
+        '200':
+          description: Summary metrics for the synced clan roster
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/clan/members:
+    get:
+      operationId: getClanMembers
+      summary: List clan members or search by player name
+      parameters:
+        - in: query
+          name: search
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+      responses:
+        '200':
+          description: Member records
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/war/current:
+    get:
+      operationId: getCurrentWar
+      summary: Get latest synced war, participants, and attacks
+      responses:
+        '200':
+          description: Latest stored war
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/war/history:
+    get:
+      operationId: getWarHistory
+      summary: List recent synced wars
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+      responses:
+        '200':
+          description: Recent war history
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/capital-raids/latest:
+    get:
+      operationId: getLatestCapitalRaid
+      summary: Get latest synced Capital Raid Weekend and participants
+      responses:
+        '200':
+          description: Latest stored raid
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/sync/status:
+    get:
+      operationId: getSyncStatus
+      summary: Get recent scheduled and manual sync outcomes
+      responses:
+        '200':
+          description: Recent sync runs
+          content:
+            application/json:
+              schema:
+                type: object
+  /api/v1/sync/refresh:
+    post:
+      operationId: refreshClashOfClansData
+      summary: Trigger a manual refresh from the Clash of Clans API
+      description: Fetches and stores the existing supported datasets using the same lock as the scheduled scheduler. Only call when the user asks to refresh.
+      responses:
+        '200':
+          description: Refresh results
+          content:
+            application/json:
+              schema:
+                type: object
+        '409':
+          description: A sync is already running
+          content:
+            application/json:
+              schema:
+                type: object
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
