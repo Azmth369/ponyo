@@ -100,7 +100,7 @@ paths:
     get:
       operationId: getClanPlayerActivity
       summary: Get player activity changes and donation leaders
-      description: Compares current live roster values with stored snapshots at or before the requested window start. Can identify observed Town Hall upgrades and donation/received-counter increases when a suitable baseline snapshot exists. Not an exact login tracker. Also compares lifetime Clan Capital contribution snapshots to rank contribution increases over the selected window when snapshot coverage exists.
+      description: Compares current live roster values with stored snapshots at or before the requested window start. lastObservedActivityAt is the latest time consecutive stored snapshots showed an actual tracked-statistic change, not the latest check time; lastObservedChanges identifies the changed metrics. Can identify observed Town Hall upgrades and donation/received-counter increases when a suitable baseline snapshot exists. Not an exact login tracker. Also compares lifetime Clan Capital contribution snapshots to rank contribution increases over the selected window when snapshot coverage exists.
       parameters:
         - name: hours
           in: query
@@ -194,6 +194,30 @@ paths:
                     type: array
                     items:
                       type: object
+                      properties:
+                        playerTag: { type: string }
+                        name: { type: string }
+                        lastObservedActivityAt: { type: [string, 'null'] }
+                        lastObservedChanges:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              metric: { type: string }
+                              previous:
+                                oneOf:
+                                  - type: string
+                                  - type: number
+                                  - type: boolean
+                                  - type: 'null'
+                              current:
+                                oneOf:
+                                  - type: string
+                                  - type: number
+                                  - type: boolean
+                                  - type: 'null'
+                            additionalProperties: true
+                        lastCheckedAt: { type: [string, 'null'] }
                       additionalProperties: true
                   note: { type: string }
                 additionalProperties: true
