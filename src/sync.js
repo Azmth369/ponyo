@@ -303,7 +303,7 @@ export async function syncCwl() {
   if (!group || group.state === 'notInWar') return { state: group?.state ?? 'notInCwl' };
 
   const seasonKey = group.season ?? null;
-  let seasonUid = await findCwlSeasonUid(seasonKey);
+  let seasonUid = await findCwlSeasonUid(seasonKey, clanTag);
   if (!seasonUid) seasonUid = await allocateSeq('cwl_seasons', 'generated_cwl_id', 'CWL');
 
   const starts = [];
