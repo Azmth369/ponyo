@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { syncClan, syncWar, syncHistory, syncCwl, run } from './sync.js';
 import { syncCapital } from './capitalSync.js';
+import { syncCapitalContributionSnapshots } from './contributionSync.js';
 import { migrateLegacyUids } from './migrateUids.js';
 
 const bool = (name, fallback = true) => {
@@ -22,7 +23,7 @@ const schedules = [
   ['history', bool('ENABLE_HISTORY_SYNC'), interval('HISTORY_POLL_MS', 1800000), syncHistory],
   ['capital', bool('ENABLE_CAPITAL_SYNC'), interval('CAPITAL_POLL_MS', 60000), syncCapital],
   ['cwl', bool('ENABLE_CWL_SYNC'), interval('CWL_POLL_MS', 60000), syncCwl],
-  ['player-snapshot', bool('ENABLE_PLAYER_SNAPSHOT_SYNC'), interval('PLAYER_POLL_MS', 1800000), () => syncClan(true)]
+  ['player-snapshot', bool('ENABLE_PLAYER_SNAPSHOT_SYNC'), interval('PLAYER_POLL_MS', 1800000), async () => ({ clanSnapshot: await syncClan(true), capitalContributions: await syncCapitalContributionSnapshots() })]
 ];
 
 const startupJobs = [
@@ -31,7 +32,7 @@ const startupJobs = [
   ['history', bool('STARTUP_HISTORY_SYNC'), syncHistory],
   ['capital', bool('STARTUP_CAPITAL_SYNC'), syncCapital],
   ['cwl', bool('STARTUP_CWL_SYNC'), syncCwl],
-  ['player-snapshot', bool('STARTUP_PLAYER_SNAPSHOT_SYNC'), () => syncClan(true)]
+  ['player-snapshot', bool('STARTUP_PLAYER_SNAPSHOT_SYNC'), async () => ({ clanSnapshot: await syncClan(true), capitalContributions: await syncCapitalContributionSnapshots() })]
 ];
 
 let syncRunning = false;
@@ -59,7 +60,7 @@ export async function refreshNow() {
   try {
     for (const [name, fn] of [
       ['clan', () => syncClan(false)], ['war', syncWar], ['history', syncHistory],
-      ['capital', syncCapital], ['cwl', syncCwl], ['player-snapshot', () => syncClan(true)]
+      ['capital', syncCapital], ['cwl', syncCwl], ['player-snapshot', async () => ({ clanSnapshot: await syncClan(true), capitalContributions: await syncCapitalContributionSnapshots() })]
     ]) {
       results[name] = await run('manual-' + name, fn);
     }
