@@ -356,6 +356,41 @@ export async function handleApi(req, res, url) {
       return true;
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/v1/capital-raids/history') {
+      const limit = Math.min(50, Math.max(1, Number(url.searchParams.get('limit')) || 10));
+      const seasons = await rows(
+        db.from('capital_raid_season')
+          .select('*')
+          .order('battle_start', { ascending: false, nullsFirst: false })
+          .limit(limit)
+      );
+      const data = [];
+      for (const season of seasons) {
+        const uid = season.generated_uid;
+        const participants = await rows(
+          db.from('capital_raid_participants')
+            .select('player_name,player_id,attacks_used,attacks_available,total_loot_gained,capital_raid_attack_uid,capital_raid_start,capital_raid_end')
+            .eq('capital_raid_uid', uid)
+            .order('total_loot_gained', { ascending: false })
+            .limit(100)
+        );
+        const attacks = await rows(
+          db.from('capital_raid_attacklog')
+            .select('*')
+            .eq('capital_raid_uid', uid)
+            .order('generated_uid', { ascending: true })
+            .limit(1000)
+        );
+        data.push({ season, participants, attacks, attackDetailsAvailable: attacks.length > 0, warType: 'Capital Raid Weekend' });
+      }
+      send(res, 200, {
+        data, count: data.length, limit, source: 'supabase',
+        historyType: 'capital_raid_weekend',
+        note: 'Historical Capital Raid Weekend summaries are stored separately from regular Clan War and CWL history. Some older seasons may have summaries without participant or attack-level details if the Clash of Clans API did not return those details.'
+      });
+      return true;
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/v1/capital-raids/latest') {
       const seasons = await rows(db.from('capital_raid_season').select('*').order('battle_start', { ascending: false }).limit(1));
       if (!seasons.length) { send(res, 200, { data: null }); return true; }
