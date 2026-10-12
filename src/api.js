@@ -296,6 +296,25 @@ export async function handleApi(req, res, url) {
       }
       const normalizePlayerTag = value => String(value ?? '').replace(/^#/, '').toUpperCase();
 
+      const lastChangeByTag = new Map();
+      const orderedSnapshots = [...snapshots].sort((a, b) => new Date(a.date_time) - new Date(b.date_time));
+      const previousByTag = new Map();
+      const tagKey = value => String(value ?? '').replace(/^#/, '').toUpperCase();
+      for (const snap of orderedSnapshots) {
+        const key = tagKey(snap.player_id);
+        const previous = previousByTag.get(key);
+        if (previous) {
+          const changes = [];
+          if (Number(previous.th) !== Number(snap.th)) changes.push({ metric: 'townHallLevel', previous: previous.th, current: snap.th });
+          if (Number(previous.lvl) !== Number(snap.lvl)) changes.push({ metric: 'xpLevel', previous: previous.lvl, current: snap.lvl });
+          if (Number(previous.trophies) !== Number(snap.trophies)) changes.push({ metric: 'trophies', previous: previous.trophies, current: snap.trophies });
+          if (Number(previous.troops_donated) !== Number(snap.troops_donated)) changes.push({ metric: 'donations', previous: previous.troops_donated, current: snap.troops_donated });
+          if (Number(previous.troops_received) !== Number(snap.troops_received)) changes.push({ metric: 'troopsReceived', previous: previous.troops_received, current: snap.troops_received });
+          if (changes.length) lastChangeByTag.set(key, { at: snap.date_time, changes });
+        }
+        previousByTag.set(key, snap);
+      }
+
       const activityRows = roster.map(member => {
         const baseline = baselineByTag.get(member.tag);
         const donationsNow = Number(member.donations ?? 0);
@@ -313,6 +332,10 @@ export async function handleApi(req, res, url) {
         const contributionBaselineValue = contributionBaseline?.contribution == null ? null : Number(contributionBaseline.contribution);
         const contributionCurrentValue = contributionLatest?.contribution == null ? null : Number(contributionLatest.contribution);
         const contributionDelta = contributionBaselineValue != null && contributionCurrentValue != null ? contributionCurrentValue - contributionBaselineValue : null;
+        const observedChange = lastChangeByTag.get(tagKey(member.tag)) ?? null;
+        const contributionChanged = contributionDelta != null && contributionDelta !== 0;
+        const observedChanges = [...(observedChange?.changes ?? [])];
+        if (contributionChanged) observedChanges.push({ metric: 'lifetimeClanCapitalContribution', previous: contributionBaselineValue, current: contributionCurrentValue });
         return {
           playerTag: member.tag,
           name: member.name,
@@ -336,7 +359,8 @@ export async function handleApi(req, res, url) {
           contributionBaselineMissing: !contributionBaseline,
           donationCounterReset,
           baselineSnapshotAt: baseline?.date_time ?? null,
-          lastObservedActivityAt: null,
+          lastObservedActivityAt: observedChange?.at ?? (contributionChanged ? contributionLatest?.observed_at ?? null : null),
+          lastObservedChanges: observedChanges,
           lastCheckedAt: latestSnapshotTime
         };
       });
@@ -359,12 +383,6 @@ export async function handleApi(req, res, url) {
         ? Math.round((Date.now() - new Date(latestSnapshotTime).getTime()) / 3600000 * 10) / 10
         : null;
 
-      const storedActivity = await rows(
-        db.from('clan_info').select('player_id,last_active').limit(1000)
-      );
-      const lastActiveByTag = new Map(storedActivity.map(row => [row.player_id, row.last_active]));
-      for (const row of activityRows) row.lastObservedActivityAt = lastActiveByTag.get(row.playerTag) ?? null;
-
       send(res, 200, {
         clanName: clan.name,
         clanTag: clan.tag,
@@ -385,7 +403,7 @@ export async function handleApi(req, res, url) {
         count: activityRows.length,
         source: 'clash_of_clans_api_plus_snapshots',
         generatedAt: new Date().toISOString(),
-        note: 'Window metrics compare the current live roster with the latest stored snapshot at or before the window start. Clan Capital contribution deltas use lifetime player-profile contribution snapshots and require a baseline at or before the window start and a later snapshot. Results are only as precise as snapshot coverage. Donation counters may reset; rows with resets or no baseline have null deltas. Town Hall upgrades are detected only when the baseline and current Town Hall levels differ. Observed statistic changes do not prove exact login times.'
+        note: 'lastObservedActivityAt is the latest timestamp at which consecutive stored snapshots showed an actual tracked-statistic change; it is not the latest check time. lastObservedChanges identifies those changed statistics. Contribution comparisons use lifetime profile snapshots. Coverage and snapshot retention limit historical certainty. Donation counters may reset; observed changes do not prove exact login times.'
       });
       return true;
     }
