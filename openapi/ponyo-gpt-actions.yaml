@@ -100,7 +100,7 @@ paths:
     get:
       operationId: getClanPlayerActivity
       summary: Get player activity changes and donation leaders
-      description: Compares current live roster values with stored snapshots at or before the requested window start. Can identify observed Town Hall upgrades and donation/received-counter increases when a suitable baseline snapshot exists. Not an exact login tracker. Lifetime Clan Capital contribution deltas require separate historical contribution snapshots and are not included yet.
+      description: Compares current live roster values with stored snapshots at or before the requested window start. Can identify observed Town Hall upgrades and donation/received-counter increases when a suitable baseline snapshot exists. Not an exact login tracker. Also compares lifetime Clan Capital contribution snapshots to rank contribution increases over the selected window when snapshot coverage exists.
       parameters:
         - name: hours
           in: query
@@ -169,6 +169,27 @@ paths:
                         name: { type: string }
                         receivedInWindow: { type: [integer, 'null'] }
                       additionalProperties: true
+                  capitalContributionLeaders:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        playerTag: { type: string }
+                        name: { type: string }
+                        lifetimeClanCapitalContributionAtWindowStart: { type: [integer, 'null'] }
+                        lifetimeClanCapitalContributionNow: { type: [integer, 'null'] }
+                        contributionIncreaseInWindow: { type: [integer, 'null'] }
+                        contributionBaselineAt: { type: [string, 'null'] }
+                        contributionComparisonAt: { type: [string, 'null'] }
+                        contributionBaselineMissing: { type: boolean }
+                      additionalProperties: true
+                  capitalContributionCoverage:
+                    type: object
+                    properties:
+                      membersWithBaseline: { type: integer }
+                      currentMembers: { type: integer }
+                      latestSnapshotAt: { type: [string, 'null'] }
+                    additionalProperties: true
                   data:
                     type: array
                     items:
