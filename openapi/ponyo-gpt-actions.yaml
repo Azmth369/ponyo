@@ -100,7 +100,7 @@ paths:
     get:
       operationId: getClanPlayerActivity
       summary: Get player activity changes and donation leaders
-      description: Compares current live roster values with stored snapshots at or before the requested window start. lastObservedActivityAt is the latest time consecutive stored snapshots showed an actual tracked-statistic change, not the latest check time; lastObservedChanges identifies the changed metrics. Can identify observed Town Hall upgrades and donation/received-counter increases when a suitable baseline snapshot exists. Not an exact login tracker. Also compares lifetime Clan Capital contribution snapshots to rank contribution increases over the selected window when snapshot coverage exists.
+      description: Compares player snapshots to identify observed changes, including Town Hall, XP, trophies, donations, troops received and lifetime Clan Capital contribution. lastObservedActivityAt reflects a detected change, not a check time. Results depend on historical snapshot coverage and do not prove login times.
       parameters:
         - name: hours
           in: query
