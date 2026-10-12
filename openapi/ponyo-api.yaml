@@ -335,7 +335,7 @@ paths:
     get:
       operationId: getCapitalRaidHistory
       summary: Get historical Capital Raid Weekends
-      description: Returns stored Capital Raid Weekend summaries, clan participants and attack details where available. This is separate from regular Clan War and CWL history.
+      description: Returns compact stored Capital Raid Weekend summaries and participant leaderboards. Use includeAttacks=true only when attack-level detail is specifically needed, because it increases response size.
       parameters:
         - name: limit
           in: query
@@ -346,6 +346,13 @@ paths:
             minimum: 1
             maximum: 50
             default: 10
+        - name: includeAttacks
+          in: query
+          required: false
+          description: Include attack-level records. Leave false for normal history queries to keep the response compact.
+          schema:
+            type: boolean
+            default: false
       responses:
         '200':
           description: Historical raid weekends
@@ -359,7 +366,14 @@ paths:
                     items:
                       type: object
                       properties:
-                        season: { type: object, additionalProperties: true }
+                        generated_uid: { type: string }
+                        battle_start: { type: [string, 'null'] }
+                        battle_end: { type: [string, 'null'] }
+                        total_loot: { type: [integer, 'null'] }
+                        raids_won: { type: [integer, 'null'] }
+                        total_attacks: { type: [integer, 'null'] }
+                        participants_no: { type: [integer, 'null'] }
+                        absentees_no: { type: [integer, 'null'] }
                         participants:
                           type: array
                           items:
@@ -376,11 +390,12 @@ paths:
                           items:
                             type: object
                             additionalProperties: true
-                        attackDetailsAvailable: { type: boolean }
+                        attackDetailsAvailable: { type: [boolean, 'null'] }
                         warType: { type: string }
                       additionalProperties: true
                   count: { type: integer }
                   limit: { type: integer }
+                  includeAttacks: { type: boolean }
                   source: { type: string }
                   historyType: { type: string }
                   note: { type: string }
