@@ -204,8 +204,18 @@ paths:
                             type: object
                             properties:
                               metric: { type: string }
-                              previous: {}
-                              current: {}
+                              previous:
+                                oneOf:
+                                  - type: string
+                                  - type: number
+                                  - type: boolean
+                                  - type: 'null'
+                              current:
+                                oneOf:
+                                  - type: string
+                                  - type: number
+                                  - type: boolean
+                                  - type: 'null'
                             additionalProperties: true
                         lastCheckedAt: { type: [string, 'null'] }
                       additionalProperties: true
