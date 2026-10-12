@@ -415,6 +415,7 @@ async function handleAiCommand(interaction, provider, generator) {
 client.on('interactionCreate', async interaction => {
   console.log(`[discord] interaction received type=${interaction.type} command=${interaction.commandName || 'none'} customId=${interaction.customId || 'none'}`);
 
+  try {
   if (interaction.isChatInputCommand()) {
     if (interaction.commandName === 'ask') {
       await handleAiCommand(interaction, 'Sarvam', answer);
@@ -463,8 +464,16 @@ client.on('interactionCreate', async interaction => {
     content: pageContent(saved.provider, '—', chunks, page),
     components: chunks.length > 1 ? [viewerRow(id, page, chunks.length)] : []
   });
-}).catch(error => {
-  console.error('[discord] uncaught interactionCreate handler error', error);
+  } catch (error) {
+    console.error('[discord] uncaught interactionCreate handler error', error);
+    if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
+      try {
+        await interaction.reply({ content: 'Ponyo hit an internal error while processing that interaction. Please try again.', ephemeral: true });
+      } catch (replyError) {
+        console.error('[discord] could not acknowledge failed interaction', replyError);
+      }
+    }
+  }
 });
 
 setInterval(() => {
