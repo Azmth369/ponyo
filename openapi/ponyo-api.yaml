@@ -143,7 +143,11 @@ paths:
                   ok:
                     type: boolean
                   data:
-                    $ref: '#/components/schemas/EmptyObject'
+                    type: object
+                    properties:
+                      ok:
+                        type: boolean
+                    additionalProperties: true
                   error:
                     type: string
                 additionalProperties: true
@@ -179,7 +183,11 @@ paths:
                   ok:
                     type: boolean
                   data:
-                    $ref: '#/components/schemas/EmptyObject'
+                    type: object
+                    properties:
+                      ok:
+                        type: boolean
+                    additionalProperties: true
                   error:
                     type: string
                 additionalProperties: true
@@ -198,7 +206,11 @@ paths:
                   ok:
                     type: boolean
                   data:
-                    $ref: '#/components/schemas/EmptyObject'
+                    type: object
+                    properties:
+                      ok:
+                        type: boolean
+                    additionalProperties: true
                   error:
                     type: string
                 additionalProperties: true
@@ -223,7 +235,11 @@ paths:
                   ok:
                     type: boolean
                   data:
-                    $ref: '#/components/schemas/EmptyObject'
+                    type: object
+                    properties:
+                      ok:
+                        type: boolean
+                    additionalProperties: true
                   error:
                     type: string
                 additionalProperties: true
@@ -242,7 +258,11 @@ paths:
                   ok:
                     type: boolean
                   data:
-                    $ref: '#/components/schemas/EmptyObject'
+                    type: object
+                    properties:
+                      ok:
+                        type: boolean
+                    additionalProperties: true
                   error:
                     type: string
                 additionalProperties: true
@@ -261,7 +281,11 @@ paths:
                   ok:
                     type: boolean
                   data:
-                    $ref: '#/components/schemas/EmptyObject'
+                    type: object
+                    properties:
+                      ok:
+                        type: boolean
+                    additionalProperties: true
                   error:
                     type: string
                 additionalProperties: true
@@ -281,7 +305,11 @@ paths:
                   ok:
                     type: boolean
                   data:
-                    $ref: '#/components/schemas/EmptyObject'
+                    type: object
+                    properties:
+                      ok:
+                        type: boolean
+                    additionalProperties: true
                   error:
                     type: string
                 additionalProperties: true
@@ -303,10 +331,3 @@ components:
       type: http
       scheme: bearer
 
-  schemas:
-    EmptyObject:
-      type: object
-      properties:
-        ok:
-          type: boolean
-      additionalProperties: true
