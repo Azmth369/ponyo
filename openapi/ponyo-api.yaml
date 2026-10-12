@@ -61,11 +61,21 @@ paths:
   /api/v1/clan/activity:
     get:
       operationId: getClanPlayerActivity
-      summary: Get inferred last observed activity for clan members
-      description: Activity is inferred from changes in trophies, XP, Town Hall level, or donation counters between snapshots. This is not an exact last-login timestamp. Requires recurring snapshots for useful history.
+      summary: Get player activity changes and donation leaders
+      description: Compares current live roster values with stored snapshots at or before the requested window start. Can identify observed Town Hall upgrades and donation/received-counter increases when a suitable baseline snapshot exists. Not an exact login tracker. Lifetime Clan Capital contribution deltas require separate historical contribution snapshots and are not included yet.
+      parameters:
+        - name: hours
+          in: query
+          required: false
+          description: Lookback window in hours, from 1 to 168; default 24
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 168
+            default: 24
       responses:
         '200':
-          description: Activity report for the current live clan roster
+          description: Snapshot-based player activity report
           content:
             application/json:
               schema:
@@ -73,28 +83,60 @@ paths:
                 properties:
                   clanName: { type: string }
                   clanTag: { type: string }
+                  windowHours: { type: integer }
+                  windowStart: { type: string }
+                  windowEnd: { type: string }
                   count: { type: integer }
                   source: { type: string }
                   generatedAt: { type: string }
-                  note: { type: string }
-                  data:
+                  snapshotCoverage:
+                    type: object
+                    properties:
+                      membersWithBaseline: { type: integer }
+                      currentMembers: { type: integer }
+                      latestSnapshotAt: { type: [string, 'null'] }
+                      latestSnapshotAgeHours: { type: [number, 'null'] }
+                    additionalProperties: true
+                  townHallUpgrades:
                     type: array
                     items:
                       type: object
                       properties:
                         playerTag: { type: string }
                         name: { type: string }
-                        role: { type: [string, 'null'] }
+                        previousTownHallLevel: { type: [integer, 'null'] }
                         townHallLevel: { type: [integer, 'null'] }
-                        xpLevel: { type: [integer, 'null'] }
-                        trophies: { type: [integer, 'null'] }
-                        troopsDonated: { type: [integer, 'null'] }
-                        troopsReceived: { type: [integer, 'null'] }
-                        lastObservedActivityAt: { type: [string, 'null'] }
-                        lastCheckedAt: { type: [string, 'null'] }
-                        activityStatus: { type: string }
-                        interpretation: { type: string }
+                        townHallUpgradeObserved: { type: boolean }
+                        baselineSnapshotAt: { type: [string, 'null'] }
                       additionalProperties: true
+                  donationLeaders:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        playerTag: { type: string }
+                        name: { type: string }
+                        previousDonations: { type: [integer, 'null'] }
+                        currentDonations: { type: integer }
+                        donationsInWindow: { type: [integer, 'null'] }
+                        donationCounterReset: { type: boolean }
+                        baselineSnapshotAt: { type: [string, 'null'] }
+                      additionalProperties: true
+                  receivedLeaders:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        playerTag: { type: string }
+                        name: { type: string }
+                        receivedInWindow: { type: [integer, 'null'] }
+                      additionalProperties: true
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  note: { type: string }
                 additionalProperties: true
   /api/v1/clan/summary:
     get:
