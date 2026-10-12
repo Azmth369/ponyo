@@ -62,6 +62,24 @@ export async function syncCapital() {
     const members = Array.isArray(raid.members) ? raid.members : [];
     const stats = participantStats(raid, roster);
 
+    // Historical summaries can be returned without member-level details.
+    // Keep previously saved participant/absentee summary fields in that case
+    // instead of replacing them with zero participants and a full absentee list.
+    const { data: previousSeason, error: previousSeasonError } = await db
+      .from('capital_raid_season')
+      .select('participants_no,absentees_no,participants_name,absentees_name,data')
+      .eq('generated_uid', seasonId)
+      .maybeSingle();
+    if (previousSeasonError) throw previousSeasonError;
+
+    const hasMemberDetails = members.length > 0;
+    const participantNames = hasMemberDetails
+      ? stats.participants
+      : (previousSeason?.participants_name ?? []);
+    const absenteeNames = hasMemberDetails
+      ? stats.absentees
+      : (previousSeason?.absentees_name ?? []);
+
     await upsert('capital_raid_season', [{
       generated_uid: seasonId,
       battle_start: start,
@@ -69,15 +87,16 @@ export async function syncCapital() {
       total_loot: Number(raid.capitalTotalLoot ?? 0),
       raids_won: Number(raid.raidsCompleted ?? 0),
       total_attacks: Number(raid.totalAttacks ?? 0),
-      participants_no: stats.participantsNo,
-      absentees_no: stats.absenteesNo,
-      participants_name: stats.participants,
-      absentees_name: stats.absentees,
+      participants_no: hasMemberDetails ? stats.participantsNo : (previousSeason?.participants_no ?? null),
+      absentees_no: hasMemberDetails ? stats.absenteesNo : (previousSeason?.absentees_no ?? null),
+      participants_name: participantNames,
+      absentees_name: absenteeNames,
       data: {
+        ...(previousSeason?.data ?? {}),
         ...raid,
-        clanRosterSize: stats.rosterSize,
-        participantNames: stats.participants,
-        absenteeNames: stats.absentees
+        clanRosterSize: hasMemberDetails ? stats.rosterSize : (previousSeason?.data?.clanRosterSize ?? null),
+        participantNames,
+        absenteeNames
       }
     }]);
 
