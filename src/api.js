@@ -78,6 +78,27 @@ export async function handleApi(req, res, url) {
         return true;
       }
 
+      // A supplied player tag is authoritative: fetch the live profile directly.
+      // Do not require a player-tag lookup to match the current clan roster.
+      if (/^#?[0289PYLQGRJCUV]+$/i.test(search) && search.replace(/^#/, '').length >= 3) {
+        const playerTag = search.startsWith('#') ? search : `#${search}`;
+        const player = await fetchPlayer(playerTag);
+        send(res, 200, {
+          data: {
+            name: player.name,
+            playerTag: player.tag ?? playerTag,
+            clanName: player.clan?.name ?? null,
+            townHallLevel: player.townHallLevel ?? null,
+            totalClanCapitalContribution: Number(player.clanCapitalContributions ?? 0)
+          },
+          metric: 'lifetime_clan_capital_contribution',
+          source: 'clash_of_clans_player_api',
+          checkedAt: new Date().toISOString(),
+          note: 'This is the player profile total Clan Capital contribution, not loot gained in a single Capital Raid Weekend.'
+        });
+        return true;
+      }
+
       const clan = await fetchClan();
       const roster = clan.memberList ?? [];
       const normalized = search.toLowerCase().replace(/^#/, '');
