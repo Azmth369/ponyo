@@ -8,6 +8,30 @@ servers:
 security:
   - BearerAuth: []
 paths:
+  /api/v1/clan/player-capital-contribution:
+    get:
+      operationId: getPlayerCapitalContribution
+      summary: Get a player's lifetime Clan Capital contribution
+      description: Use this endpoint when asked for a player's total Capital contribution or contribution reputation. This is the lifetime clanCapitalContributions statistic from the player's live profile, not total loot gained in a single Capital Raid Weekend.
+      parameters:
+        - in: query
+          name: player
+          required: true
+          description: Exact player name or player tag. If multiple players match, the response lists candidates to disambiguate.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Player lifetime contribution or ambiguous matches
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: Missing player parameter
+        '404':
+          description: No current clan member matched
   /api/v1/clan/summary:
     get:
       operationId: getClanSummary
