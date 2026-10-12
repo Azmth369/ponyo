@@ -358,9 +358,10 @@ export async function handleApi(req, res, url) {
 
     if (req.method === 'GET' && url.pathname === '/api/v1/capital-raids/history') {
       const limit = Math.min(50, Math.max(1, Number(url.searchParams.get('limit')) || 10));
+      const includeAttacks = ['true', '1', 'yes'].includes(String(url.searchParams.get('includeAttacks') ?? '').toLowerCase());
       const seasons = await rows(
         db.from('capital_raid_season')
-          .select('*')
+          .select('generated_uid,battle_start,battle_end,total_loot,raids_won,total_attacks,participants_no,absentees_no,participants_name,absentees_name')
           .order('battle_start', { ascending: false, nullsFirst: false })
           .limit(limit)
       );
@@ -369,24 +370,35 @@ export async function handleApi(req, res, url) {
         const uid = season.generated_uid;
         const participants = await rows(
           db.from('capital_raid_participants')
-            .select('player_name,player_id,attacks_used,attacks_available,total_loot_gained,capital_raid_attack_uid,capital_raid_start,capital_raid_end')
+            .select('player_name,player_id,attacks_used,attacks_available,total_loot_gained')
             .eq('capital_raid_uid', uid)
             .order('total_loot_gained', { ascending: false })
-            .limit(100)
+            .limit(50)
         );
-        const attacks = await rows(
-          db.from('capital_raid_attacklog')
-            .select('*')
-            .eq('capital_raid_uid', uid)
-            .order('generated_uid', { ascending: true })
-            .limit(1000)
-        );
-        data.push({ season, participants, attacks, attackDetailsAvailable: attacks.length > 0, warType: 'Capital Raid Weekend' });
+        let attacks = [];
+        if (includeAttacks) {
+          attacks = await rows(
+            db.from('capital_raid_attacklog')
+              .select('generated_uid,capital_raid_uid,attacker_id,attacker_name,defender_id,defender_name,stars,destruction_percentage,capital_resources_looted,data')
+              .eq('capital_raid_uid', uid)
+              .order('generated_uid', { ascending: true })
+              .limit(500)
+          );
+        }
+        data.push({
+          ...season,
+          participants,
+          attacks: includeAttacks ? attacks : undefined,
+          attackDetailsAvailable: includeAttacks ? attacks.length > 0 : null,
+          warType: 'Capital Raid Weekend'
+        });
       }
       send(res, 200, {
-        data, count: data.length, limit, source: 'supabase',
+        data, count: data.length, limit, includeAttacks, source: 'supabase',
         historyType: 'capital_raid_weekend',
-        note: 'Historical Capital Raid Weekend summaries are stored separately from regular Clan War and CWL history. Some older seasons may have summaries without participant or attack-level details if the Clash of Clans API did not return those details.'
+        note: includeAttacks
+          ? 'Returns compact season summaries, participant summaries and attack rows where stored. A season with no attack rows may not have captured attack-level data.'
+          : 'Compact history mode returns season summaries and participant leaderboards. Attack-level logs are excluded to keep responses small; request includeAttacks=true for attack details.'
       });
       return true;
     }
