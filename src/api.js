@@ -181,6 +181,48 @@ export async function handleApi(req, res, url) {
       return true;
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/v1/clan/activity') {
+      const clan = await fetchClan();
+      const roster = clan.memberList ?? [];
+      const stored = await rows(
+        db.from('clan_info').select('player_id,last_active,date_time').limit(1000)
+      );
+      const activityByTag = new Map(stored.map(row => [row.player_id, row]));
+      const data = roster.map(member => {
+        const record = activityByTag.get(member.tag);
+        return {
+          playerTag: member.tag,
+          name: member.name,
+          role: member.role ?? null,
+          townHallLevel: member.townHallLevel ?? null,
+          xpLevel: member.expLevel ?? null,
+          trophies: member.trophies ?? null,
+          troopsDonated: member.donations ?? null,
+          troopsReceived: member.donationsReceived ?? null,
+          lastObservedActivityAt: record?.last_active ?? null,
+          lastCheckedAt: record?.date_time ?? null,
+          activityStatus: record?.last_active ? 'activity_observed' : 'not_enough_snapshot_history',
+          interpretation: record?.last_active
+            ? 'A tracked stat changed between snapshots at or before this time; this is not an exact last-login timestamp.'
+            : 'No tracked activity timestamp is available yet. More successful snapshots are needed.'
+        };
+      }).sort((x, y) => {
+        if (!x.lastObservedActivityAt) return 1;
+        if (!y.lastObservedActivityAt) return -1;
+        return y.lastObservedActivityAt.localeCompare(x.lastObservedActivityAt);
+      });
+      send(res, 200, {
+        clanName: clan.name,
+        clanTag: clan.tag,
+        count: data.length,
+        source: 'clash_of_clans_api_plus_snapshots',
+        generatedAt: new Date().toISOString(),
+        note: 'Last observed activity is inferred from changes in trophies, XP level, Town Hall level, and troop donation/received counters. Trophy changes alone can occur from defensive battles; this is not a true online timestamp.',
+        data
+      });
+      return true;
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/v1/clan/summary') {
       // Derive all headline figures from the same live roster as getClanMembers.
       const clan = await fetchClan();
