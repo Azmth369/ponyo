@@ -35,6 +35,21 @@ const startupJobs = [
 ];
 
 let syncRunning = false;
+let pendingPlayerSnapshot = false;
+
+// Do not lose the player-activity snapshot when another scheduled sync is busy.
+// Coalesce missed ticks into one follow-up snapshot instead of queuing an unbounded backlog.
+async function flushPendingPlayerSnapshot() {
+  if (!pendingPlayerSnapshot || syncRunning) return;
+  pendingPlayerSnapshot = false;
+  syncRunning = true;
+  try {
+    await run('player-snapshot', () => syncClan(true));
+  } finally {
+    syncRunning = false;
+    if (pendingPlayerSnapshot) void flushPendingPlayerSnapshot();
+  }
+}
 
 // Run a manual refresh through the same lock as scheduled jobs, so requests cannot overlap.
 export async function refreshNow() {
@@ -51,6 +66,7 @@ export async function refreshNow() {
     return { busy: false, completedAt: new Date().toISOString(), results };
   } finally {
     syncRunning = false;
+    await flushPendingPlayerSnapshot();
   }
 }
 
@@ -98,10 +114,21 @@ export async function startSyncScheduler() {
       continue;
     }
     setInterval(async () => {
-      if (syncRunning) return console.log(`[sync] skipped ${name}; another sync is running`);
+      if (syncRunning) {
+        if (name === 'player-snapshot') {
+          pendingPlayerSnapshot = true;
+          console.log('[sync] queued player-snapshot; another sync is running');
+        } else {
+          console.log(`[sync] skipped ${name}; another sync is running`);
+        }
+        return;
+      }
       syncRunning = true;
       try { await run(name, fn); }
-      finally { syncRunning = false; }
+      finally {
+        syncRunning = false;
+        await flushPendingPlayerSnapshot();
+      }
     }, ms);
     console.log(`[sync] recurring ${name} every ${ms}ms`);
   }
