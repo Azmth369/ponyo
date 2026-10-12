@@ -56,10 +56,16 @@ export async function findWarSessionUid({ battleStart, battleEnd }) {
 }
 
 // CWL seasons are identified by the league season date in the group payload.
-export async function findCwlSeasonUid(season) {
-  if (season == null) return null;
+export async function findCwlSeasonUid(season, clanTag) {
+  if (season == null || !clanTag) return null;
+  const normalizeTag = value => String(value ?? '').replace(/^#/, '').toUpperCase();
+  const targetTag = normalizeTag(clanTag);
   const rows = await recentRows('cwl_seasons', 'generated_cwl_id,data', [{ column: 'battle_start', ascending: false, nullsFirst: false }], 500);
-  const row = rows.find(r => r.data?.season === season);
+  const row = rows.find(r =>
+    r.data?.season === season &&
+    Array.isArray(r.data?.clans) &&
+    r.data.clans.some(clan => normalizeTag(clan.tag) === targetTag)
+  );
   return row?.generated_cwl_id ?? null;
 }
 
