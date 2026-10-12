@@ -1,4 +1,5 @@
 import { db } from './db.js';
+import { getCurrentWar as fetchCurrentWar } from './cocApi.js';
 import { refreshNow } from './index.js';
 
 const send = (res, status, body) => {
@@ -65,15 +66,15 @@ export async function handleApi(req, res, url) {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/v1/war/current') {
-      const sessions = await rows(db.from('cw_session').select('*').order('battle_start', { ascending: false }).limit(1));
-      if (!sessions.length) {
-        send(res, 200, { data: null, message: 'No synced war session found' });
-        return true;
-      }
-      const session = sessions[0];
-      const participants = await rows(db.from('cw_session_participants').select('player_name,player_id,attacks_used,attacks_available,stars_scored,destruction_caused,player_map_position').eq('cw_uid', session.cw_uid).order('player_map_position', { ascending: true }));
-      const attacks = await rows(db.from('cw_attacklog').select('cw_attack_uid,attacker_name_with_map_position,defender_name_with_map_position,star_scored,destruction_caused,attacking_date_time,attacker_id').eq('cw_uid', session.cw_uid).order('attacking_date_time', { ascending: false }).limit(100));
-      send(res, 200, { data: { session, participants, attacks }, source: 'supabase' });
+      // Current-war questions must use the live Clash of Clans API, not the
+      // newest stored session (which may be a completed war from weeks ago).
+      const war = await fetchCurrentWar();
+      send(res, 200, {
+        data: war,
+        source: 'clash_of_clans_api',
+        checkedAt: new Date().toISOString(),
+        isLive: war?.state !== 'warEnded' && war?.state !== 'notInWar'
+      });
       return true;
     }
 
