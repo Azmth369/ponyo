@@ -127,12 +127,21 @@ export async function syncWar() {
 export async function syncHistory() {
   const warlog = await getWarLog();
   let saved = 0;
+  let summaryOnly = 0;
+  let withRoster = 0;
   for (const war of warlog.items ?? []) {
     const cwUid = await resolveWarUid(war);
-    await saveNormalWar({ ...war, state: 'warEnded' }, cwUid);
+    const result = await saveNormalWar({ ...war, state: 'warEnded' }, cwUid);
+    if (result.summaryOnly) summaryOnly++;
+    else if (result.members > 0) withRoster++;
     saved++;
   }
-  return { wars: saved, note: 'Historical warlog records contain summaries; attack rows come only from captured currentwar snapshots.' };
+  return {
+    wars: saved,
+    summaryOnly,
+    withRoster,
+    note: 'Summary-only war-log entries update results without deleting participant or attack records captured from currentwar.'
+  };
 }
 
 // ---------------------------------------------------------------------------
