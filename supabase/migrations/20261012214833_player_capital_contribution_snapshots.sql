@@ -1,0 +1,21 @@
+-- Historical migration already applied to the linked Supabase project.
+-- Keep this file in sync with supabase_migrations.schema_migrations.
+
+create table if not exists public.player_capital_contribution_snap (
+  id bigint primary key,
+  clan_tag text not null,
+  player_tag text not null,
+  player_name text not null,
+  contribution bigint not null check (contribution >= 0),
+  observed_at timestamptz not null default now(),
+  source text not null default 'clash_of_clans_player_api',
+  created_at timestamptz not null default now()
+);
+
+create index if not exists player_capital_contribution_snap_clan_time_idx
+  on public.player_capital_contribution_snap (clan_tag, observed_at desc);
+
+create index if not exists player_capital_contribution_snap_player_time_idx
+  on public.player_capital_contribution_snap (player_tag, observed_at desc);
+
+alter table public.player_capital_contribution_snap enable row level security;
