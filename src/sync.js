@@ -72,9 +72,13 @@ async function saveNormalWarSummary(war, session) {
   if (lookupError) throw lookupError;
 
   if (existing) {
+    // Never let missing fields from a summary overwrite known detailed values.
+    const summaryPatch = Object.fromEntries(
+      Object.entries(summary).filter(([, value]) => value != null)
+    );
     // Update summary fields only. Preserve participants, attack counts and the
     // richer currentwar payload already stored for this session.
-    const { error } = await db.from('cw_session').update(summary).eq('cw_uid', session.cw_uid);
+    const { error } = await db.from('cw_session').update(summaryPatch).eq('cw_uid', session.cw_uid);
     if (error) throw error;
   } else {
     // A summary-only historical war is still useful, but it has no player rows.
