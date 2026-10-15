@@ -172,19 +172,43 @@ async function latestSnapshotBatch() {
 
 // Keep only the N most recent snapshot batches (default 12, per the database
 // design notes; override with SNAPSHOT_KEEP_BATCHES).
-export async function trimSnapshots(keep = Number(process.env.SNAPSHOT_KEEP_BATCHES ?? 120)) {
-  const { data, error } = await db
+export async function trimSnapshots(keep = Number(process.env.SNAPSHOT_KEEP_BATCHES ?? 12)) {
+  const keepCount = Number.isFinite(keep) && keep >= 1 ? Math.floor(keep) : 12;
+  const pageSize = 1000;
+  const times = new Set();
+  let offset = 0;
+
+  // Page through rows until we have the cutoff batch. A single fixed LIMIT can
+  // see too few distinct timestamps when batches are large, silently disabling
+  // retention. Stop once keepCount + 1 distinct batches are found.
+  while (times.size <= keepCount) {
+    const { data, error } = await db
+      .from('clan_info_snap')
+      .select('date_time')
+      .order('date_time', { ascending: false })
+      .range(offset, offset + pageSize - 1);
+    if (error) throw error;
+
+    const rows = data ?? [];
+    for (const row of rows) {
+      if (row.date_time) times.add(row.date_time);
+    }
+    if (rows.length < pageSize) break;
+    offset += pageSize;
+  }
+
+  const orderedTimes = [...times].sort((a, b) => b.localeCompare(a));
+  if (orderedTimes.length <= keepCount) {
+    return { batches: orderedTimes.length, deleted: 0 };
+  }
+
+  const cutoff = orderedTimes[keepCount];
+  const removed = await db
     .from('clan_info_snap')
-    .select('date_time')
-    .order('date_time', { ascending: false })
-    .limit(3000);
-  if (error) throw error;
-  const times = [...new Set((data ?? []).map(r => r.date_time))];
-  if (times.length <= keep) return { batches: times.length, deleted: 0 };
-  const cutoff = times[keep];
-  const removed = await db.from('clan_info_snap').delete().lt('date_time', cutoff);
+    .delete({ count: 'exact' })
+    .lt('date_time', cutoff);
   if (removed.error) throw removed.error;
-  return { batches: keep, deleted: removed.count ?? null };
+  return { batches: keepCount, deleted: removed.count ?? null };
 }
 
 export async function syncClan(captureSnapshots = false) {
