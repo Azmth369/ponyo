@@ -51,11 +51,55 @@ export async function run(job, fn) {
 // Normal Clan War (CW)
 // ---------------------------------------------------------------------------
 
-// Attack rows are delete+inserted per session so the sequential ATK numbering
-// always matches the current API state exactly.
+// Attack rows are replaced only when the API payload contains a real roster.
+// War-log summaries have no member roster; they must never erase details captured
+// from currentwar snapshots.
+async function saveNormalWarSummary(war, session) {
+  const summary = {
+    opponent_clan_name: session.opponent_clan_name,
+    opponent_clan_id: session.opponent_clan_id,
+    size: session.size,
+    battle_start: session.battle_start,
+    battle_end: session.battle_end,
+    result: session.result,
+    our_clan_score: session.our_clan_score,
+    opponent_clan_score: session.opponent_clan_score,
+    our_clan_destruction: session.our_clan_destruction,
+    opponent_clan_destruction: session.opponent_clan_destruction
+  };
+  const { data: existing, error: lookupError } = await db
+    .from('cw_session').select('cw_uid').eq('cw_uid', session.cw_uid).maybeSingle();
+  if (lookupError) throw lookupError;
+
+  if (existing) {
+    // Never let missing fields from a summary overwrite known detailed values.
+    const summaryPatch = Object.fromEntries(
+      Object.entries(summary).filter(([, value]) => value != null)
+    );
+    // Update summary fields only. Preserve participants, attack counts and the
+    // richer currentwar payload already stored for this session.
+    const { error } = await db.from('cw_session').update(summaryPatch).eq('cw_uid', session.cw_uid);
+    if (error) throw error;
+  } else {
+    // A summary-only historical war is still useful, but it has no player rows.
+    await upsert('cw_session', [{
+      ...session,
+      ...summary,
+      participants_size: 0,
+      our_participants: [],
+      opponent_participants: [],
+      data: war
+    }]);
+  }
+  return { members: 0, attacks: 0, cwUid: session.cw_uid, summaryOnly: true };
+}
+
+// Attack rows are delete+inserted per session so sequential ATK numbering matches
+// the current API state exactly, but only when the API supplies member details.
 export async function saveNormalWar(war, cwUid) {
   const rows = normalWarRows(war, cwUid, clanTag);
   if (!rows.session) return { members: 0, attacks: 0, cwUid };
+  if (!rows.participants.length) return saveNormalWarSummary(war, rows.session);
 
   await upsert('cw_session', [rows.session]);
 
@@ -65,7 +109,7 @@ export async function saveNormalWar(war, cwUid) {
 
   const removedParticipants = await db.from('cw_session_participants').delete().eq('cw_uid', cwUid);
   if (removedParticipants.error) throw removedParticipants.error;
-  if (rows.participants.length) await upsert('cw_session_participants', rows.participants);
+  await upsert('cw_session_participants', rows.participants);
   return { members: rows.participants.length, attacks: rows.attacks.length, cwUid };
 }
 
@@ -87,12 +131,21 @@ export async function syncWar() {
 export async function syncHistory() {
   const warlog = await getWarLog();
   let saved = 0;
+  let summaryOnly = 0;
+  let withRoster = 0;
   for (const war of warlog.items ?? []) {
     const cwUid = await resolveWarUid(war);
-    await saveNormalWar({ ...war, state: 'warEnded' }, cwUid);
+    const result = await saveNormalWar({ ...war, state: 'warEnded' }, cwUid);
+    if (result.summaryOnly) summaryOnly++;
+    else if (result.members > 0) withRoster++;
     saved++;
   }
-  return { wars: saved, note: 'Historical warlog records contain summaries; attack rows come only from captured currentwar snapshots.' };
+  return {
+    wars: saved,
+    summaryOnly,
+    withRoster,
+    note: 'Summary-only war-log entries update results without deleting participant or attack records captured from currentwar.'
+  };
 }
 
 // ---------------------------------------------------------------------------

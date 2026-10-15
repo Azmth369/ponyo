@@ -36,19 +36,35 @@ const startupJobs = [
 ];
 
 let syncRunning = false;
-let pendingPlayerSnapshot = false;
+// Coalesce repeated ticks by job name. No scheduled sync is silently discarded;
+// at most one pending run per job is retained while another sync is in progress.
+const pendingJobs = new Map();
 
-// Do not lose the player-activity snapshot when another scheduled sync is busy.
-// Coalesce missed ticks into one follow-up snapshot instead of queuing an unbounded backlog.
-async function flushPendingPlayerSnapshot() {
-  if (!pendingPlayerSnapshot || syncRunning) return;
-  pendingPlayerSnapshot = false;
+async function flushPendingJobs() {
+  if (syncRunning || pendingJobs.size === 0) return;
+  const [name, fn] = pendingJobs.entries().next().value;
+  pendingJobs.delete(name);
   syncRunning = true;
   try {
-    await run('player-snapshot', async () => ({ clanSnapshot: await syncClan(true), capitalContributions: await syncCapitalContributionSnapshots() }));
+    await run(name, fn);
   } finally {
     syncRunning = false;
-    if (pendingPlayerSnapshot) void flushPendingPlayerSnapshot();
+    if (pendingJobs.size) await flushPendingJobs();
+  }
+}
+
+async function scheduleJob(name, fn) {
+  if (syncRunning) {
+    pendingJobs.set(name, fn);
+    console.log(`[sync] queued ${name}; another sync is running`);
+    return;
+  }
+  syncRunning = true;
+  try {
+    await run(name, fn);
+  } finally {
+    syncRunning = false;
+    await flushPendingJobs();
   }
 }
 
@@ -67,7 +83,7 @@ export async function refreshNow() {
     return { busy: false, completedAt: new Date().toISOString(), results };
   } finally {
     syncRunning = false;
-    await flushPendingPlayerSnapshot();
+    await flushPendingJobs();
   }
 }
 
@@ -114,22 +130,8 @@ export async function startSyncScheduler() {
       console.log(`[sync] recurring ${name} disabled`);
       continue;
     }
-    setInterval(async () => {
-      if (syncRunning) {
-        if (name === 'player-snapshot') {
-          pendingPlayerSnapshot = true;
-          console.log('[sync] queued player-snapshot; another sync is running');
-        } else {
-          console.log(`[sync] skipped ${name}; another sync is running`);
-        }
-        return;
-      }
-      syncRunning = true;
-      try { await run(name, fn); }
-      finally {
-        syncRunning = false;
-        await flushPendingPlayerSnapshot();
-      }
+    setInterval(() => {
+      void scheduleJob(name, fn);
     }, ms);
     console.log(`[sync] recurring ${name} every ${ms}ms`);
   }
