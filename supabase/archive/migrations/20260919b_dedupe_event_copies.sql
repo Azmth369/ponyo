@@ -1,9 +1,6 @@
--- Removes duplicate war/season copies that were created because the sync's
--- natural-key lookup compared timestamps as strings ("2026-09-18T07:00:00.000Z"
--- vs "2026-09-18 07:00:00+00"), so every re-sync allocated a new CW/CR UID for
--- the same event. Keeps the most recently allocated UID per battle window and
--- deletes the stale copies with their participants, attack logs and season rows.
--- Safe to run more than once.
+-- Archived historical cleanup SQL; not part of the active Supabase CLI chain.
+-- The live database currently has no duplicate war or Capital Raid windows.
+-- Review before running this script manually because it deletes event rows.
 
 begin;
 

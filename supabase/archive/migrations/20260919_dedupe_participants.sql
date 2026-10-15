@@ -1,3 +1,7 @@
+-- Archived historical migration; audit copy only, not part of active CLI chain.
+-- Running it manually would recreate redundant uniq_* constraints.
+-- Original SQL preserved below.
+
 -- Removes duplicate event-participant rows that accumulated when the live
 -- database was missing the unique constraints from ponyo_schema.sql, then
 -- enforces those constraints so the upsert-based syncs dedupe naturally.
