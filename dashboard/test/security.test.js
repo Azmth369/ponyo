@@ -8,8 +8,9 @@ import { setTimeout as delay } from 'node:timers/promises';
 const OWNER = 'owner@example.com';
 const VIEWER = 'viewer@example.com';
 const RUNNER = 'runner@example.com';
-const active = new Set([VIEWER, RUNNER]);
-const permissions = new Map([[VIEWER, []], [RUNNER, ['sync.run']]]);
+const REPORT_MANAGER = 'reports@example.com';
+const active = new Set([VIEWER, RUNNER, REPORT_MANAGER]);
+const permissions = new Map([[VIEWER, []], [RUNNER, ['sync.run']], [REPORT_MANAGER, ['reports.manage']]]);
 let upstream;
 let dashboard;
 let dashboardBase;
@@ -26,7 +27,7 @@ async function body(req) {
   return raw ? JSON.parse(raw) : {};
 }
 function emailForToken(token) {
-  return ({ 'owner-token': OWNER, 'viewer-token': VIEWER, 'runner-token': RUNNER })[token] || null;
+  return ({ 'owner-token': OWNER, 'viewer-token': VIEWER, 'runner-token': RUNNER, 'reports-token': REPORT_MANAGER })[token] || null;
 }
 function listen(server) {
   return new Promise((resolve, reject) => {
@@ -66,7 +67,7 @@ before(async () => {
     try {
       if (url.pathname === '/auth/v1/token' && req.method === 'POST') {
         const input = await body(req);
-        const tokens = { [OWNER]: 'owner-token', [VIEWER]: 'viewer-token', [RUNNER]: 'runner-token' };
+        const tokens = { [OWNER]: 'owner-token', [VIEWER]: 'viewer-token', [RUNNER]: 'runner-token', [REPORT_MANAGER]: 'reports-token' };
         if (!tokens[input.email] || input.password !== 'correct-horse-battery-staple') return json(res, 401, { message: 'Invalid login' });
         return json(res, 200, { access_token: tokens[input.email], expires_in: 3600 });
       }
@@ -101,6 +102,18 @@ before(async () => {
       }
       if (url.pathname === '/api/v1/dashboard/audit') {
         return isOwner ? json(res, 200, { data: [] }) : json(res, 403, { error: 'Only owner' });
+      }
+      if (url.pathname === '/api/v1/dashboard/reports/enabled' && req.method === 'POST') {
+        if (!(isOwner || (active.has(actor) && (permissions.get(actor) || []).includes('reports.manage')))) return json(res, 403, { error: 'No report permission' });
+        const input = await body(req);
+        if (!['war', 'capital_raid'].includes(input.event_type) || !input.event_uid || typeof input.enabled !== 'boolean') return json(res, 400, { error: 'Invalid report control' });
+        return json(res, 200, { data: { event_type: input.event_type, event_uid: input.event_uid, enabled: input.enabled } });
+      }
+      if (url.pathname === '/api/v1/dashboard/reports/retry' && req.method === 'POST') {
+        if (!(isOwner || (active.has(actor) && (permissions.get(actor) || []).includes('reports.manage')))) return json(res, 403, { error: 'No report permission' });
+        const input = await body(req);
+        if (!['war', 'capital_raid'].includes(input.event_type) || !input.event_uid) return json(res, 400, { error: 'Invalid report identity' });
+        return json(res, 202, { data: { event_type: input.event_type, event_uid: input.event_uid, state: 'ready' } });
       }
       if (url.pathname === '/api/v1/dashboard/sync/refresh' && req.method === 'POST') {
         const allowed = isOwner || (active.has(actor) && (permissions.get(actor) || []).includes('sync.run'));
@@ -191,4 +204,25 @@ test('revoking a grant invalidates an existing session on its next request', asy
   assert.equal(revoked.status, 200);
   const response = await session(viewer.cookie);
   assert.equal(response.status, 401);
+});
+
+test('report management permission is required for pause, enable, and retry', async () => {
+  const viewer = await login(VIEWER);
+  const deniedPause = await mutate('/api/reports/enabled', 'POST', viewer.cookie, { event_type: 'war', event_uid: 'CW-123', enabled: false });
+  assert.equal(deniedPause.status, 403);
+  const deniedRetry = await mutate('/api/reports/retry', 'POST', viewer.cookie, { event_type: 'war', event_uid: 'CW-123' });
+  assert.equal(deniedRetry.status, 403);
+
+  const manager = await login(REPORT_MANAGER);
+  const paused = await mutate('/api/reports/enabled', 'POST', manager.cookie, { event_type: 'capital_raid', event_uid: 'CR-456', enabled: false });
+  assert.equal(paused.status, 200);
+  assert.equal((await paused.json()).data.enabled, false);
+  const retry = await mutate('/api/reports/retry', 'POST', manager.cookie, { event_type: 'war', event_uid: 'CW-123' });
+  assert.equal(retry.status, 202);
+
+  const noOrigin = await request('/api/reports/retry', {
+    method: 'POST', headers: { cookie: manager.cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ event_type: 'war', event_uid: 'CW-123' })
+  });
+  assert.equal(noOrigin.status, 403);
 });
