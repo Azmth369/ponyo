@@ -40,7 +40,7 @@ function showLogin(message = '') {
 }
 function showApp(user) {
   $('#login-view').classList.add('hidden'); $('#app-view').classList.remove('hidden');
-  $('#user-email').textContent = user.email || ''; $('#user-role').textContent = user.role === 'owner' ? 'Owner' : 'Clan admin';
+  $('#user-email').textContent = user.email || ''; $('#user-role').textContent = user.role === 'owner' ? 'Owner' : 'Viewer';
 }
 function setSection(section) {
   document.querySelectorAll('.dashboard-section').forEach(node => node.classList.add('hidden'));
