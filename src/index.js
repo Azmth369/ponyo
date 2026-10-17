@@ -43,14 +43,17 @@ let syncRunning = false;
 // Coalesce repeated ticks by job name. No scheduled sync is silently discarded;
 // at most one pending run per job is retained while another sync is in progress.
 const pendingJobs = new Map();
+let sharedLockAvailable = true;
 
 async function claimDistributedLock(owner) {
+  if (!sharedLockAvailable) return true;
   const { data, error } = await db.rpc('claim_dashboard_sync_lock', {
     p_owner: owner, p_lease_seconds: 3600
   });
   if (error) {
     if (/claim_dashboard_sync_lock|PGRST202|42883|could not find the function/i.test(String(error.message || ''))) {
-      console.error('[sync] shared lock migration is not installed; using the existing in-process lock until it is applied');
+      sharedLockAvailable = false;
+      console.error('[sync] shared-lock migration is not installed; using the existing in-process lock until the service restarts after migration');
       return true;
     }
     throw error;
@@ -59,10 +62,13 @@ async function claimDistributedLock(owner) {
 }
 
 async function releaseDistributedLock(owner) {
+  if (!sharedLockAvailable) return;
   const { error } = await db.rpc('release_dashboard_sync_lock', { p_owner: owner });
-  if (error && !/release_dashboard_sync_lock|PGRST202|42883|could not find the function/i.test(String(error.message || ''))) {
-    console.error('[sync] failed to release shared sync lock:', error.message);
+  if (error && /release_dashboard_sync_lock|PGRST202|42883|could not find the function/i.test(String(error.message || ''))) {
+    sharedLockAvailable = false;
+    return;
   }
+  if (error) console.error('[sync] failed to release shared sync lock:', error.message);
 }
 
 async function flushPendingJobs() {
