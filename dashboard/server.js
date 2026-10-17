@@ -115,7 +115,7 @@ function roleFor(email) {
 }
 
 async function ponyoControl(path, options = {}, actorEmail = '') {
-  const base = (process.env.PONYO_API_URL || '').replace(/\\/+$/, '');
+  const base = (process.env.PONYO_API_URL || '').replace(/\/+$/, '');
   const response = await fetch(base + '/api/v1/dashboard' + path, {
     method: options.method || 'GET',
     headers: {
