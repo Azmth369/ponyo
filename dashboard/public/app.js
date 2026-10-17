@@ -1,5 +1,6 @@
 const $ = selector => document.querySelector(selector);
 let dashboard = null;
+let currentUser = null;
 let toastTimer;
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
@@ -39,14 +40,19 @@ function showLogin(message = '') {
   $('#app-view').classList.add('hidden'); $('#login-view').classList.remove('hidden'); $('#login-error').textContent = message;
 }
 function showApp(user) {
+  currentUser = user;
   $('#login-view').classList.add('hidden'); $('#app-view').classList.remove('hidden');
   $('#user-email').textContent = user.email || ''; $('#user-role').textContent = user.role === 'owner' ? 'Owner' : 'Viewer';
+  $('#access-nav').classList.toggle('hidden', user.role !== 'owner');
+  const canRunSync = user.role === 'owner' || (user.permissions || []).includes('sync.run');
+  $('#sync-controls-panel').classList.toggle('hidden', !canRunSync);
 }
 function setSection(section) {
+  if (section === 'access' && currentUser?.role !== 'owner') section = 'overview';
   document.querySelectorAll('.dashboard-section').forEach(node => node.classList.add('hidden'));
   const target = $('#section-' + section); if (target) target.classList.remove('hidden');
   document.querySelectorAll('.nav-link').forEach(node => node.classList.toggle('active', node.dataset.section === section));
-  const titles = { overview: 'Overview', syncs: 'Sync health', reports: 'Discord reports', clan: 'Clan analytics', history: 'War & raid history' };
+  const titles = { overview: 'Overview', syncs: 'Sync health', access: 'Access management', reports: 'Discord reports', clan: 'Clan analytics', history: 'War & raid history' };
   $('#page-title').textContent = titles[section] || 'Overview';
 }
 function metric(label, value, sub) {
@@ -178,11 +184,100 @@ async function loadDashboard() {
   catch (error) { if (error.status === 401) return showLogin('Your session has expired. Please sign in again.'); $('#page-error').textContent = error.message; $('#page-error').classList.remove('hidden'); }
   finally { $('#refresh-button').disabled = false; $('#refresh-button').textContent = '↻ Refresh'; }
 }
+async function loadAccess() {
+  if (currentUser?.role !== 'owner') return;
+  $('#access-table').innerHTML = '<div class="empty">Loading approved accounts…</div>';
+  try {
+    const result = await api('/api/access');
+    const rows = result.data || [];
+    $('#access-table').innerHTML = table(
+      ['Email', 'Access', 'Permissions', 'Updated', 'Action'],
+      rows.map(entry => [
+        escapeHtml(entry.email),
+        entry.is_active ? 'Active' : 'Revoked',
+        escapeHtml((entry.permissions || []).includes('sync.run') ? 'Run full sync' : 'View only'),
+        escapeHtml(date(entry.updated_at || entry.created_at)),
+        '<button class="table-action danger" type="button" data-revoke-email="' + escapeHtml(entry.email) + '">Revoke</button>'
+      ]),
+      'No approved users yet. Add an account above after creating it in Supabase Auth.'
+    );
+    $('#access-table').querySelectorAll('[data-revoke-email]').forEach(button => button.addEventListener('click', async () => {
+      const email = button.dataset.revokeEmail;
+      if (!confirm('Revoke dashboard access for ' + email + '?')) return;
+      button.disabled = true;
+      try { await api('/api/access?email=' + encodeURIComponent(email), { method: 'DELETE' }); showToast('Access revoked'); await loadAccess(); await loadAudit(); }
+      catch (error) { showToast(error.message); button.disabled = false; }
+    }));
+  } catch (error) {
+    $('#access-table').innerHTML = '<div class="empty">Could not load access list: ' + escapeHtml(error.message) + '</div>';
+  }
+}
+async function loadAudit() {
+  if (currentUser?.role !== 'owner') return;
+  $('#audit-table').innerHTML = '<div class="empty">Loading audit log…</div>';
+  try {
+    const result = await api('/api/audit');
+    $('#audit-table').innerHTML = table(
+      ['When (IST)', 'Actor', 'Action', 'Target', 'Details'],
+      (result.data || []).map(entry => [
+        escapeHtml(date(entry.created_at)), escapeHtml(entry.actor_email),
+        escapeHtml(entry.action), escapeHtml(entry.target_email || '—'),
+        escapeHtml(JSON.stringify(entry.details || {}))
+      ]),
+      'No dashboard actions have been recorded yet.'
+    );
+  } catch (error) {
+    $('#audit-table').innerHTML = '<div class="empty">Could not load audit log: ' + escapeHtml(error.message) + '</div>';
+  }
+}
+async function runFullSync() {
+  if (!currentUser || !(currentUser.role === 'owner' || (currentUser.permissions || []).includes('sync.run'))) return;
+  if (!confirm('Start a full Ponyo sync now? This refreshes clan, war, war history, CWL, Capital Raid and player snapshots. It does not publish Discord reports.')) return;
+  const button = $('#run-full-sync');
+  button.disabled = true; button.textContent = 'Starting…';
+  $('#sync-control-status').innerHTML = '<strong>Control status</strong><span>Submitting request…</span>';
+  try {
+    const result = await api('/api/sync/refresh', { method: 'POST', body: JSON.stringify({ confirmation: 'RUN_FULL_SYNC' }) });
+    const run = result.data || {};
+    $('#sync-control-status').innerHTML = '<strong>Control status</strong><span>' + escapeHtml(run.status || 'running') + ' · ' + escapeHtml(run.message || 'Accepted') + '</span>';
+    showToast('Full sync accepted by Ponyo');
+    if (run.id) await pollSyncStatus(run.id);
+  } catch (error) {
+    $('#sync-control-status').innerHTML = '<strong>Control status</strong><span>' + escapeHtml(error.message) + '</span>';
+    showToast(error.message);
+  } finally {
+    button.disabled = false; button.textContent = 'Run full sync…';
+  }
+}
+async function pollSyncStatus(id) {
+  for (let attempt = 0; attempt < 120; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    try {
+      const result = await api('/api/sync/refresh-status?id=' + encodeURIComponent(id));
+      const run = result.data || {};
+      $('#sync-control-status').innerHTML = '<strong>Control status</strong><span>' + escapeHtml(run.status || 'unknown') + ' · ' + escapeHtml(run.message || '') + '</span>';
+      if (['completed', 'failed', 'busy'].includes(run.status)) {
+        showToast(run.status === 'completed' ? 'Full sync completed' : 'Full sync ended: ' + run.status);
+        if (run.status === 'completed' || run.status === 'failed') await loadDashboard();
+        return;
+      }
+    } catch (error) {
+      $('#sync-control-status').innerHTML = '<strong>Control status</strong><span>' + escapeHtml(error.message) + '</span>';
+      return;
+    }
+  }
+  $('#sync-control-status').innerHTML = '<strong>Control status</strong><span>Still running; refresh this page later to check the recorded status.</span>';
+}
+async function loadAfterSignIn(user) {
+  showApp(user);
+  await loadDashboard();
+  if (user.role === 'owner') { await loadAccess(); await loadAudit(); }
+}
 async function boot() {
   try {
     const status = await api('/api/status');
     if (!status.configured) { $('#setup-notice').textContent = 'Dashboard setup is incomplete. The owner must configure the required Render environment variables before sign-in is available.'; $('#setup-notice').classList.remove('hidden'); }
-    const session = await api('/api/session'); showApp(session.user); await loadDashboard();
+    const session = await api('/api/session'); await loadAfterSignIn(session.user);
   } catch (error) {
     if (error.status === 503) { $('#setup-notice').textContent = 'Dashboard setup is incomplete. The owner must configure the required Render environment variables before sign-in is available.'; $('#setup-notice').classList.remove('hidden'); }
     showLogin();
@@ -192,19 +287,38 @@ $('#login-form').addEventListener('submit', async event => {
   event.preventDefault(); const button = $('#login-button');
   const email = $('#email').value.trim(); const password = $('#password').value;
   $('#login-error').textContent = ''; button.disabled = true; button.textContent = 'Signing in…';
-  try { const result = await api('/api/login', { method: 'POST', body: JSON.stringify({ email, password }) }); showApp(result.user); await loadDashboard(); }
+  try { const result = await api('/api/login', { method: 'POST', body: JSON.stringify({ email, password }) }); await loadAfterSignIn(result.user); }
   catch (error) { $('#login-error').textContent = error.message; }
   finally { button.disabled = false; button.textContent = 'Sign in securely'; }
 });
 $('#refresh-button').addEventListener('click', loadDashboard);
 $('#logout-button').addEventListener('click', async () => {
   try { await api('/api/logout', { method: 'POST', body: '{}' }); } catch {}
-  dashboard = null; $('#password').value = ''; showLogin('You have signed out.');
+  dashboard = null; currentUser = null; $('#password').value = ''; showLogin('You have signed out.');
 });
 document.querySelectorAll('[data-section]').forEach(link => link.addEventListener('click', () => setSection(link.dataset.section)));
 window.addEventListener('hashchange', () => {
   const section = location.hash.replace('#', '');
-  if (['overview', 'syncs', 'reports', 'clan', 'history'].includes(section)) setSection(section);
+  if (['overview', 'syncs', 'access', 'reports', 'clan', 'history'].includes(section)) setSection(section);
 });
 setSection(location.hash.replace('#', '') || 'overview');
 boot();
+
+$('#access-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (currentUser?.role !== 'owner') return;
+  const email = $('#access-email').value.trim().toLowerCase();
+  const permissions = $('#permission-sync-run').checked ? ['sync.run'] : [];
+  const message = $('#access-form-message');
+  message.textContent = 'Saving permissions…';
+  try {
+    await api('/api/access', { method: 'PUT', body: JSON.stringify({ email, permissions }) });
+    message.textContent = permissions.length ? 'Access saved. This account can view the dashboard and run full syncs.' : 'Access saved as view-only.';
+    showToast('Permissions saved');
+    $('#access-form').reset();
+    await loadAccess(); await loadAudit();
+  } catch (error) { message.textContent = error.message; }
+});
+$('#refresh-access').addEventListener('click', loadAccess);
+$('#refresh-audit').addEventListener('click', loadAudit);
+$('#run-full-sync').addEventListener('click', runFullSync);
