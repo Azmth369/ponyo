@@ -87,3 +87,25 @@ Pure payload transformations live in `src/transform.js` with no I/O, so they are
 ## AI provider failure alerts
 
 The bot can send detailed, private provider failure alerts to a dedicated Discord channel via `PONYO_ALERT_CHANNEL_ID`. Provider errors are classified separately for context-window, quota/rate-limit, API-key, temporary and unknown failures; users receive a short safe message instead of the raw provider response.
+
+
+## Automatic event reports
+
+Ponyo can automatically publish final Normal Clan War and Capital Raid Weekend reports to your Discord `#data-report` channel.
+
+- Tracks events while their recorded end time is still in the future.
+- Waits for a configurable settling delay, then refreshes final war-log / raid data.
+- Uses deterministic formatting and alphabetically sorted player lists.
+- Uses a Supabase publication ledger and Discord nonce to prevent duplicate reports.
+- Retries when final participant or attack data is incomplete.
+- All report dates are displayed in IST (`DD/MM/YYYY`).
+
+### Setup
+
+1. Apply `supabase/migrations/20261018030000_event_report_publications.sql` in the Supabase SQL Editor.
+2. In Render, add `PONYO_DATA_REPORT_CHANNEL_ID` with the numeric ID of your Discord `#data-report` channel. The bot needs permission to view the channel and send messages.
+3. Ensure `DISCORD_TOKEN`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY` are configured as they are for the existing bot.
+4. Set `ENABLE_EVENT_REPORTS=true`, `REPORT_POLL_MS=60000`, `PONYO_REPORT_SETTLE_DELAY_MS=120000`, and `PONYO_REPORT_ROSTER_SIZE=44` in Render.
+5. Review and merge the automatic-report pull request, then deploy the updated branch.
+
+Reports are generated from saved API-backed rows, not from an AI-generated guess. If the service was not running while an event was active, that event may not have an active tracking record and may not be auto-reported; existing historical records are not automatically bulk-posted.

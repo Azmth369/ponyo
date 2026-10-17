@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { syncClan, syncWar, syncHistory, syncCwl, run } from './sync.js';
 import { syncCapital } from './capitalSync.js';
 import { syncCapitalContributionSnapshots } from './contributionSync.js';
+import { processEventReports } from './reporting.js';
 import { migrateLegacyUids } from './migrateUids.js';
 
 const bool = (name, fallback = true) => {
@@ -23,7 +24,8 @@ const schedules = [
   ['history', bool('ENABLE_HISTORY_SYNC'), interval('HISTORY_POLL_MS', 1800000), syncHistory],
   ['capital', bool('ENABLE_CAPITAL_SYNC'), interval('CAPITAL_POLL_MS', 60000), syncCapital],
   ['cwl', bool('ENABLE_CWL_SYNC'), interval('CWL_POLL_MS', 60000), syncCwl],
-  ['player-snapshot', bool('ENABLE_PLAYER_SNAPSHOT_SYNC'), interval('PLAYER_POLL_MS', 1800000), async () => ({ clanSnapshot: await syncClan(true), capitalContributions: await syncCapitalContributionSnapshots() })]
+  ['player-snapshot', bool('ENABLE_PLAYER_SNAPSHOT_SYNC'), interval('PLAYER_POLL_MS', 1800000), async () => ({ clanSnapshot: await syncClan(true), capitalContributions: await syncCapitalContributionSnapshots() })],
+  ['event-reports', bool('ENABLE_EVENT_REPORTS'), interval('REPORT_POLL_MS', 60000), processEventReports]
 ];
 
 const startupJobs = [
@@ -32,7 +34,8 @@ const startupJobs = [
   ['history', bool('STARTUP_HISTORY_SYNC'), syncHistory],
   ['capital', bool('STARTUP_CAPITAL_SYNC'), syncCapital],
   ['cwl', bool('STARTUP_CWL_SYNC'), syncCwl],
-  ['player-snapshot', bool('STARTUP_PLAYER_SNAPSHOT_SYNC'), async () => ({ clanSnapshot: await syncClan(true), capitalContributions: await syncCapitalContributionSnapshots() })]
+  ['player-snapshot', bool('STARTUP_PLAYER_SNAPSHOT_SYNC'), async () => ({ clanSnapshot: await syncClan(true), capitalContributions: await syncCapitalContributionSnapshots() })],
+  ['event-reports', bool('ENABLE_EVENT_REPORTS'), processEventReports]
 ];
 
 let syncRunning = false;
@@ -91,8 +94,6 @@ export async function startSyncScheduler() {
   if (syncRunning) return;
   syncRunning = true;
   try {
-    // Convert legacy timestamp-based UIDs to the CW/CWL/CR scheme once,
-    // before any sync job can write new rows.
     try {
       const migrated = await migrateLegacyUids();
       if (migrated) console.log('[sync] legacy UID migration complete', migrated);
@@ -110,8 +111,6 @@ export async function startSyncScheduler() {
           const details = await fn();
           console.log(`[sync] startup ${name} complete`, details);
         } catch (error) {
-          // One broken data source must not prevent the other startup jobs
-          // (especially player snapshots) from running.
           console.error(`[sync] startup ${name} failed`, error);
         }
       }
@@ -130,9 +129,7 @@ export async function startSyncScheduler() {
       console.log(`[sync] recurring ${name} disabled`);
       continue;
     }
-    setInterval(() => {
-      void scheduleJob(name, fn);
-    }, ms);
+    setInterval(() => { void scheduleJob(name, fn); }, ms);
     console.log(`[sync] recurring ${name} every ${ms}ms`);
   }
   console.log('[sync] scheduler started');
