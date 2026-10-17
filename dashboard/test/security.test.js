@@ -207,6 +207,7 @@ test('revoking a grant invalidates an existing session on its next request', asy
 });
 
 test('report management permission is required for pause, enable, and retry', async () => {
+  active.add(VIEWER);
   const viewer = await login(VIEWER);
   const deniedPause = await mutate('/api/reports/enabled', 'POST', viewer.cookie, { event_type: 'war', event_uid: 'CW-123', enabled: false });
   assert.equal(deniedPause.status, 403);
