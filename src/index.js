@@ -131,29 +131,39 @@ export async function refreshNow() {
 export async function startSyncScheduler() {
   if (syncRunning) return;
   syncRunning = true;
+  const startupLockOwner = `startup:${process.pid}`;
+  let startupLocked = false;
   try {
-    try {
-      const migrated = await migrateLegacyUids();
-      if (migrated) console.log('[sync] legacy UID migration complete', migrated);
-    } catch (error) {
-      console.error('[sync] legacy UID migration failed; continuing with existing UIDs', error);
-    }
-
-    await run('startup', async () => {
-      for (const [name, enabled, fn] of startupJobs) {
-        if (!enabled) {
-          console.log(`[sync] startup ${name} disabled`);
-          continue;
-        }
-        try {
-          const details = await fn();
-          console.log(`[sync] startup ${name} complete`, details);
-        } catch (error) {
-          console.error(`[sync] startup ${name} failed`, error);
-        }
+    startupLocked = await claimDistributedLock(startupLockOwner);
+    if (!startupLocked) {
+      console.log('[sync] startup sync deferred; another Ponyo instance owns the shared sync lock');
+    } else {
+      try {
+        const migrated = await migrateLegacyUids();
+        if (migrated) console.log('[sync] legacy UID migration complete', migrated);
+      } catch (error) {
+        console.error('[sync] legacy UID migration failed; continuing with existing UIDs', error);
       }
-    });
+
+      await run('startup', async () => {
+        for (const [name, enabled, fn] of startupJobs) {
+          if (!enabled) {
+            console.log(`[sync] startup ${name} disabled`);
+            continue;
+          }
+          try {
+            const details = await fn();
+            console.log(`[sync] startup ${name} complete`, details);
+          } catch (error) {
+            console.error(`[sync] startup ${name} failed`, error);
+          }
+        }
+      });
+    }
+  } catch (error) {
+    console.error('[sync] startup failed before execution:', error.message);
   } finally {
+    if (startupLocked) await releaseDistributedLock(startupLockOwner);
     syncRunning = false;
   }
 
