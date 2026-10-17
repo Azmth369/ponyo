@@ -4,86 +4,51 @@ A production-oriented Discord assistant combining **Clash of Clans API data, a d
 
 ## Commands
 
-- `/ask` → **Sarvam AI** (`sarvam-105b`) for the fast everyday clan analysis path.
-- `/tell` → **Gemini** for the deeper analysis path.
+- `/ask` → Sarvam AI for fast everyday clan analysis.
+- `/tell` → Gemini for deeper analysis.
 
-Factual questions ("who has one attack left?", "who has the lowest donations?", "who are the elders?") are answered **deterministically in code** before any AI provider is involved — they are instant, free and cannot hallucinate counts. Only questions the deterministic engine cannot parse reach the AI providers, and even then the embedded structured result is authoritative.
+Factual questions are answered deterministically when possible, so the bot does not invent clan-specific counts.
 
-## Architecture
+## Automatic event reports
 
-```text
-Clash of Clans API
-        │
-        ▼
- Sync scheduler ──────► Dedicated Supabase (Ponyo schema)
-  (server-side key)       │  CW001 / CWL001 / CR001 UID system
-                          │
-                          ├── read-only AI retrieval (anon key, RLS)
-                          │       ▼
-                          │   Deterministic query engine ──► direct answer
-                          │       ▼ (unparsed questions)
-                          │   Sarvam / Gemini
-                          │       ▼
-                          │    Discord
-                          │
-                          └── backend-only AI state
-                              (ai_answers, ai_conversations, ai_chat, sync_runs)
-```
+Ponyo can automatically publish final Normal Clan War and Capital Raid Weekend reports to your Discord `#data-report` channel.
 
-## The UID system
+- Tracks events while their recorded end time is still in the future.
+- Waits for a configurable settling delay, then refreshes final war-log / raid data.
+- Uses deterministic formatting and alphabetically sorted player lists.
+- Uses a Supabase publication ledger and Discord nonce to prevent duplicate reports.
+- Retries when final participant or attack data is incomplete.
+- All report dates are displayed in IST (`DD/MM/YYYY`).
 
-Every event is identified by a human-readable UID (mirrors the spreadsheet design in `database/`):
+### Setup
 
-| Domain | Session | Day / Raid | Attack |
-|---|---|---|---|
-| Normal Clan War | `CW001` | — | `CW001-ATK001` |
-| CWL | `CWL001` | `CWL001-D1` | `CWL001-D1-ATK01` |
-| Capital Raid | `CR001` | `CR001-R1` | `CR001-R1-ATK001` |
+1. Apply `supabase/migrations/20261018030000_event_report_publications.sql` in the Supabase SQL Editor.
+2. In Render, add `PONYO_DATA_REPORT_CHANNEL_ID` with the numeric ID of your Discord `#data-report` channel. The bot needs permission to view the channel and send messages.
+3. Ensure `DISCORD_TOKEN`, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY` are configured as they are for the existing bot.
+4. Set `ENABLE_EVENT_REPORTS=true`, `REPORT_POLL_MS=60000`, `PONYO_REPORT_SETTLE_DELAY_MS=120000`, and `PONYO_REPORT_ROSTER_SIZE=44` in Render.
+5. Deploy the `feature/automatic-event-reports` branch after reviewing the pull request.
 
-- UIDs are allocated sequentially and re-syncs resolve the **same** event via natural-key lookups (battle window, CWL war tag, capital season start), so no duplicates are created.
-- Attack rows are numbered in a stable order (map position, then attack order) and rewritten per event on each sync, so numbering always matches the current API state.
-- Old timestamp-based UIDs (`#CLAN:20260915T...`) are migrated automatically at startup by `src/migrateUids.js`.
+Reports are generated from saved API-backed rows, not from an AI-generated guess. If the service was not running while an event was active, that event may not have an active tracking record and may not be auto-reported; existing historical records are not automatically bulk-posted.
 
-## Data collection
+## Architecture and data
 
-- Clan/member data (`clan_info`) with rolling snapshots (`clan_info_snap`, last 12 batches by default — see `SNAPSHOT_KEEP_BATCHES`), used to compute **last activity** per member.
-- Current war polling + war-log history (`cw_session`, `cw_session_participants`, `cw_attacklog`).
-- CWL seasons, league days, members and attacks (`cwl_seasons`, `cwl_daywise_attacklog`, `cwl_season_participants`, `cwl_attacklog`).
-- Capital raid seasons, raids and attacks (`capital_raid_season`, `capital_raid_participants`, `capital_raid_attacklog`), with participants/absentees computed against the roster snapshot from the raid start.
-- Sync status/error logging (`sync_runs`).
-- Configurable polling intervals and per-job enable flags (all environment-controlled).
-- One-time importer for legacy attack-log exports: `npm run import:legacy -- <path-to-csv>`.
-
-## AI retrieval
-
-Questions are classified before retrieval so the model receives relevant data instead of an uncontrolled database dump:
-
-1. Match the question to a data domain (query engine).
-2. Answer deterministically when the intent is structured (attack usage, member metrics, roles, war state/timing/opponent).
-3. Otherwise retrieve the narrowest useful context and give it to the requested provider.
-4. If a named opponent search returns nothing, expand to recent war history.
-5. The provider must never invent or recompute clan-specific facts.
-
-Timestamps shown to users are always converted to IST (DD/MM/YYYY, 24-hour).
-
-## Persistent long-answer controls
-
-Long responses are split into Discord-safe chunks with **See more** / **See less** controls. The full answer is stored in the backend-only `ai_answers` table for 30 days, and one-hour conversation memory lives in `ai_conversations`, so both survive restarts and redeploys. Every question and answer is also logged to `ai_chat`.
+- Clan/member data and snapshots in Supabase.
+- Normal Clan War sessions, participants, and attack log.
+- CWL seasons, daywise attacks, participants, and attack log.
+- Capital Raid seasons, participants, and attack log.
+- Sync status and backend-only AI conversation state.
+- Configurable polling intervals and per-job enable flags.
 
 ## Testing
 
 ```bash
-npm test        # query engine, UID system, and payload transformations
+npm test
 ```
 
-Pure payload transformations live in `src/transform.js` with no I/O, so they are fully unit-tested; CI (GitHub Actions, Node 22) runs the suite on every push and pull request.
+The event report formatter has unit tests for alphabetical sorting, attack counts, participation percentage, destruction tiebreaks, and incomplete data.
 
 ## Requirements
 
-- Node.js >= 22 (supabase-js requires native WebSocket).
-- A Supabase project with the Ponyo schema applied: run `supabase/ponyo_schema.sql` once, then `supabase/migrations/20260919_sync_runs.sql`.
-- Environment variables per `env.example`.
-
-## AI provider failure alerts
-
-The bot can send detailed, private provider failure alerts to a dedicated Discord channel via `PONYO_ALERT_CHANNEL_ID`. Provider errors are classified separately for context-window, quota/rate-limit, API-key, temporary and unknown failures; users receive a short safe message instead of the raw provider response.
+- Node.js >= 22.
+- Apply the base schema in `supabase/ponyo_schema.sql` and the required migrations.
+- Environment variables are documented in `env.example`.
