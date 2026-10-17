@@ -39,6 +39,66 @@ create index if not exists idx_dashboard_control_runs_started
 alter table public.dashboard_control_runs enable row level security;
 revoke all on public.dashboard_control_runs from anon, authenticated;
 
+-- Keep permission changes and their audit entries atomic. If the audit insert fails,
+-- PostgreSQL rolls back the access mutation as part of the same transaction.
+create or replace function public.grant_dashboard_access(
+  p_actor_email text, p_email text, p_permissions text[]
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $
+declare saved public.dashboard_access;
+begin
+  insert into public.dashboard_access(email, permissions, is_active, created_by, updated_at)
+  values (lower(trim(p_email)), coalesce(p_permissions, '{}'), true, lower(trim(p_actor_email)), now())
+  on conflict (email) do update
+    set permissions = excluded.permissions,
+        is_active = true,
+        updated_at = now(),
+        created_by = excluded.created_by
+  returning * into saved;
+
+  insert into public.dashboard_audit_log(actor_email, action, target_email, details)
+  values (lower(trim(p_actor_email)), 'access.granted_or_updated', lower(trim(p_email)),
+          jsonb_build_object('permissions', coalesce(p_permissions, '{}')));
+
+  return to_jsonb(saved);
+end;
+$;
+
+create or replace function public.revoke_dashboard_access(
+  p_actor_email text, p_email text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $
+declare saved public.dashboard_access;
+begin
+  update public.dashboard_access
+     set is_active = false, permissions = '{}', updated_at = now()
+   where email = lower(trim(p_email))
+   returning * into saved;
+
+  if not found then
+    return null;
+  end if;
+
+  insert into public.dashboard_audit_log(actor_email, action, target_email, details)
+  values (lower(trim(p_actor_email)), 'access.revoked', lower(trim(p_email)), '{}'::jsonb);
+
+  return jsonb_build_object('email', saved.email, 'is_active', saved.is_active);
+end;
+$;
+
+revoke all on function public.grant_dashboard_access(text, text, text[]) from public, anon, authenticated;
+revoke all on function public.revoke_dashboard_access(text, text) from public, anon, authenticated;
+grant execute on function public.grant_dashboard_access(text, text, text[]) to service_role;
+grant execute on function public.revoke_dashboard_access(text, text) to service_role;
+
 create table if not exists public.dashboard_sync_lock (
   id integer primary key check (id = 1),
   locked_by text,
