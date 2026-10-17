@@ -71,7 +71,7 @@ INSERT INTO public.event_report_publications(
   now() - interval '1 day', 'discord-message-already-sent'
 );
 
-DO $
+DO $$
 DECLARE result jsonb;
 BEGIN
   result := public.set_event_report_enabled('owner@example.com', 'war', 'CW-PHASE4-FAILED', false);
@@ -96,18 +96,18 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.dashboard_audit_log WHERE action='report.retry_requested' AND details->>'event_uid'='CW-PHASE4-FAILED') THEN
     RAISE EXCEPTION 'report retry audit row missing';
   END IF;
-END $;
+END $$;
 
 CREATE FUNCTION public.test_fail_report_audit() RETURNS trigger LANGUAGE plpgsql AS $
 BEGIN
   IF NEW.action = 'report.retry_requested' THEN RAISE EXCEPTION 'intentional report audit failure'; END IF;
   RETURN NEW;
-END $;
+END $$;
 CREATE TRIGGER test_fail_report_audit
 BEFORE INSERT ON public.dashboard_audit_log
 FOR EACH ROW EXECUTE FUNCTION public.test_fail_report_audit();
 
-DO $
+DO $$
 BEGIN
   BEGIN
     PERFORM public.retry_event_report('owner@example.com', 'war', 'CW-PHASE4-ATOMIC');
@@ -118,7 +118,7 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.event_report_publications WHERE event_type='war' AND event_uid='CW-PHASE4-ATOMIC' AND state='failed') THEN
     RAISE EXCEPTION 'report retry mutation was not rolled back after audit failure';
   END IF;
-END $;
+END $$;
 
 DROP TRIGGER test_fail_report_audit ON public.dashboard_audit_log;
 DROP FUNCTION public.test_fail_report_audit();
