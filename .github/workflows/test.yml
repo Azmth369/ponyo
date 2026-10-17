@@ -32,7 +32,7 @@ jobs:
       - name: Install dependencies
         run: npm install
       - name: Check dashboard and scheduler syntax
-        run: npm --prefix dashboard run check && node --check src/api.js && node --check src/index.js
+        run: npm --prefix dashboard run check && node --check src/api.js && node --check src/index.js && node --check src/reporting.js
       - name: Run test suite including dashboard authorization
         run: npm test
       - name: Validate dashboard migration on disposable PostgreSQL
@@ -41,5 +41,7 @@ jobs:
           container_id="$(docker ps --filter 'ancestor=postgres:16' --format '{{.ID}}' | head -n 1)"
           test -n "$container_id"
           docker exec "$container_id" psql -U postgres -d ponyo_test -v ON_ERROR_STOP=1 -c "CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;"
+          docker exec -i "$container_id" psql -U postgres -d ponyo_test -v ON_ERROR_STOP=1 < supabase/migrations/20261018030000_event_report_publications.sql
           docker exec -i "$container_id" psql -U postgres -d ponyo_test -v ON_ERROR_STOP=1 < supabase/migrations/20261018_dashboard_control_panel.sql
+          docker exec -i "$container_id" psql -U postgres -d ponyo_test -v ON_ERROR_STOP=1 < supabase/migrations/20261018120000_dashboard_report_management.sql
           docker exec -i "$container_id" psql -U postgres -d ponyo_test -v ON_ERROR_STOP=1 < supabase/tests/dashboard_control_panel_smoke.sql
