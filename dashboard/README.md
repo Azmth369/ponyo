@@ -5,7 +5,7 @@ A separate, read-only Node.js dashboard for the existing Ponyo service. It is in
 ## Current scope
 
 - Supabase Auth password sign-in
-- Server-side owner/admin email allowlist
+- Server-side owner and approved-viewer email allowlist
 - HTTP-only, SameSite=Lax session cookie; Secure cookie in production
 - Login attempt throttling and same-origin checks for login/logout
 - Server-side proxy to Ponyo's existing bearer-key API
@@ -34,7 +34,7 @@ Set these environment variables on the **dashboard service only**:
 | SUPABASE_URL | Existing Supabase project URL |
 | SUPABASE_ANON_KEY | Supabase publishable/anon key for the same project |
 | DASHBOARD_OWNER_EMAIL | Email address for the owner account |
-| DASHBOARD_ADMIN_EMAILS | Comma-separated emails approved as clan admins |
+| DASHBOARD_ADMIN_EMAILS | Comma-separated emails approved for view-only access |
 | PONYO_API_URL | https://ponyo-v845.onrender.com |
 | PONYO_API_KEY | Same server-side API key configured on the existing Ponyo service |
 
@@ -43,12 +43,12 @@ Never use the Supabase service-role key in the dashboard. The anon key is used o
 ## Supabase Auth prerequisites
 
 1. Enable Email/Password sign-in in Supabase Auth.
-2. Create the owner account and selected clan-admin accounts in Supabase Auth.
+2. Create the owner account and any selected viewer accounts in Supabase Auth.
 3. Add only approved account emails to the dashboard service allowlist.
 4. Configure email confirmation/password reset according to your Supabase Auth settings.
 5. Users not in the allowlist are denied even if they have a valid Supabase account.
 
-This initial phase uses an environment allowlist rather than a self-service admin-management screen. Change the allowlist and redeploy when administrators change. A database-backed role manager and audit trail are later-phase work.
+The owner is the only account with an owner role. Every other approved account is view-only by default, even if its email is listed in DASHBOARD_ADMIN_EMAILS. No other account can run jobs or change settings in this release. Owner-managed permission grants and an audit trail must be implemented and reviewed before any write controls are enabled.
 
 ## Read-only Ponyo API dependency
 
