@@ -9,7 +9,7 @@
 <div class="brand-mark">P</div><p class="eyebrow">CLAN OPERATIONS</p><h1>Ponyo Control Panel</h1>
 <p class="muted">A private place to monitor clan data, sync health and Discord reports.</p>
 <div id="setup-notice" class="notice hidden" role="status"></div>
-<form id="login-form"><label for="email">Administrator email</label><input id="email" name="email" type="email" autocomplete="username" required maxlength="254" placeholder="you@example.com">
+<form id="login-form"><label for="email">Approved account email</label><input id="email" name="email" type="email" autocomplete="username" required maxlength="254" placeholder="you@example.com">
 <label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required maxlength="1024" placeholder="Your Supabase Auth password">
 <button id="login-button" class="primary-button" type="submit">Sign in securely</button><p id="login-error" class="error-text" role="alert"></p></form>
 <p class="fine-print">Access is restricted to accounts approved by the dashboard owner.</p>
@@ -18,7 +18,7 @@
 <aside class="sidebar"><a class="brand" href="/" aria-label="Ponyo Control Panel home"><span class="brand-mark small">P</span><span><strong>Ponyo</strong><small>Control Panel</small></span></a>
 <nav aria-label="Dashboard sections">
 <a class="nav-link active" href="#overview" data-section="overview">◫ Overview</a><a class="nav-link" href="#syncs" data-section="syncs">↻ Sync health</a><a class="nav-link" href="#reports" data-section="reports">▤ Discord reports</a><a class="nav-link" href="#clan" data-section="clan">♙ Clan analytics</a><a class="nav-link" href="#history" data-section="history">◷ War & raid history</a>
-</nav><div class="sidebar-note"><span class="status-dot"></span> Read-only mode<small>Management controls arrive after review.</small></div></aside>
+</nav><div class="sidebar-note"><span class="status-dot"></span> Read-only mode<small>Only the owner can authorize management permissions.</small></div></aside>
 <main class="main-content">
 <header class="topbar"><div><p class="eyebrow">PONYO / OPERATIONS</p><h1 id="page-title">Overview</h1></div><div class="account-area"><span id="user-role" class="role-pill">Administrator</span><span id="user-email" class="user-email"></span><button id="refresh-button" class="quiet-button" type="button">↻ Refresh</button><button id="logout-button" class="quiet-button" type="button">Sign out</button></div></header>
 <div id="page-error" class="notice hidden" role="status"></div><div id="last-updated" class="updated-line">Loading latest data…</div>
