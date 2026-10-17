@@ -39,6 +39,49 @@ export async function handleApi(req, res, url) {
   }
 
   try {
+    if (req.method === 'GET' && url.pathname === '/api/v1/operations/summary') {
+      // Read-only operational view for the private control panel. Never expose
+      // raw details or Discord identifiers from the publication ledger.
+      const safeMessage = value => String(value ?? '')
+        .replace(/Bearer\\s+[A-Za-z0-9._-]+/gi, 'Bearer [redacted]')
+        .replace(/(token|secret|password|apikey|api_key)\\s*[:=]\\s*[^,\\s]+/gi, '$1=[redacted]')
+        .slice(0, 220);
+      const syncRuns = await rows(
+        db.from('sync_runs')
+          .select('job,status,started_at,finished_at,message')
+          .order('started_at', { ascending: false })
+          .limit(25)
+      );
+      const reports = await rows(
+        db.from('event_report_publications')
+          .select('event_type,event_uid,expected_end,state,attempts,last_error,published_at,created_at,updated_at')
+          .order('expected_end', { ascending: false })
+          .limit(30)
+      );
+      send(res, 200, {
+        generatedAt: new Date().toISOString(),
+        syncRuns: syncRuns.map(run => ({
+          job: run.job,
+          status: run.status,
+          started_at: run.started_at,
+          finished_at: run.finished_at,
+          message: safeMessage(run.message)
+        })),
+        reports: reports.map(report => ({
+          event_type: report.event_type,
+          event_uid: report.event_uid,
+          expected_end: report.expected_end,
+          state: report.state,
+          attempts: report.attempts,
+          last_error: safeMessage(report.last_error),
+          published_at: report.published_at,
+          created_at: report.created_at,
+          updated_at: report.updated_at
+        }))
+      });
+      return true;
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/v1/clan/members') {
       // Use the live clan roster so old members left in the database cannot
       // inflate the roster or appear as current members.
