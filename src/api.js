@@ -11,11 +11,20 @@ const send = (res, status, body) => {
   res.end(JSON.stringify(body));
 };
 
-function authorized(req) {
-  const expected = process.env.PONYO_API_KEY;
+function authorized(req, expected = process.env.PONYO_API_KEY) {
   if (!expected || expected.length < 32) return false;
   const header = req.headers.authorization ?? '';
   return header.startsWith('Bearer ') && header.slice(7) === expected;
+}
+
+async function readRequestJson(req) {
+  let raw = '';
+  for await (const chunk of req) {
+    raw += chunk;
+    if (Buffer.byteLength(raw, 'utf8') > 8192) throw Object.assign(new Error('Request body too large'), { status: 413 });
+  }
+  try { return raw ? JSON.parse(raw) : {}; }
+  catch { throw Object.assign(new Error('Invalid JSON body'), { status: 400 }); }
 }
 
 async function rows(query) {
@@ -31,14 +40,166 @@ export async function handleApi(req, res, url) {
     res.end();
     return true;
   }
-  if (!authorized(req)) {
-    send(res, process.env.PONYO_API_KEY ? 401 : 503, {
-      error: process.env.PONYO_API_KEY ? 'Unauthorized' : 'API not configured'
+  const controlRoute = url.pathname.startsWith('/api/v1/dashboard/');
+  const expectedKey = controlRoute ? process.env.PONYO_CONTROL_API_KEY : process.env.PONYO_API_KEY;
+  if (!authorized(req, expectedKey)) {
+    send(res, expectedKey ? 401 : 503, {
+      error: expectedKey ? 'Unauthorized' : (controlRoute ? 'Control API not configured' : 'API not configured')
     });
     return true;
   }
 
   try {
+    if (url.pathname.startsWith('/api/v1/dashboard/')) {
+      const ownerEmail = String(process.env.DASHBOARD_OWNER_EMAIL || '').trim().toLowerCase();
+      const actorEmail = String(req.headers['x-dashboard-user-email'] || '').trim().toLowerCase();
+      const isOwner = Boolean(ownerEmail && actorEmail === ownerEmail);
+      const validEmail = value => /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(String(value || ''));
+      const getAccess = async email => {
+        if (email === ownerEmail && ownerEmail) return { email, permissions: ['*'], is_active: true, role: 'owner' };
+        const { data, error } = await db.from('dashboard_access')
+          .select('email,permissions,is_active,created_at,updated_at,created_by')
+          .eq('email', email).maybeSingle();
+        if (error) throw error;
+        return data || null;
+      };
+      const audit = async (action, targetEmail, details = {}) => {
+        const { error } = await db.from('dashboard_audit_log').insert({
+          actor_email: actorEmail, action, target_email: targetEmail || null, details
+        });
+        if (error) throw error;
+      };
+
+      if (req.method === 'GET' && url.pathname === '/api/v1/dashboard/access/check') {
+        const email = String(url.searchParams.get('email') || '').trim().toLowerCase();
+        if (!validEmail(email)) { send(res, 400, { error: 'A valid email is required.' }); return true; }
+        const access = await getAccess(email);
+        return send(res, 200, access && access.is_active !== false
+          ? { approved: true, email, role: access.role || 'viewer', permissions: access.permissions || [] }
+          : { approved: false, email, role: null, permissions: [] });
+      }
+
+      if (!actorEmail || !validEmail(actorEmail)) {
+        send(res, 403, { error: 'Dashboard identity is missing.' }); return true;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/v1/dashboard/access') {
+        if (!isOwner) { send(res, 403, { error: 'Only the dashboard owner can manage access.' }); return true; }
+        const access = await rows(db.from('dashboard_access')
+          .select('email,permissions,is_active,created_at,updated_at,created_by')
+          .order('email', { ascending: true }).limit(200));
+        send(res, 200, { data: access }); return true;
+      }
+
+      if (req.method === 'PUT' && url.pathname === '/api/v1/dashboard/access') {
+        if (!isOwner) { send(res, 403, { error: 'Only the dashboard owner can grant permissions.' }); return true; }
+        const body = await readRequestJson(req);
+        const email = String(body.email || '').trim().toLowerCase();
+        const permissions = Array.isArray(body.permissions) ? [...new Set(body.permissions)] : [];
+        if (!validEmail(email) || email === ownerEmail) {
+          send(res, 400, { error: 'Enter a valid non-owner email address.' }); return true;
+        }
+        if (permissions.some(permission => permission !== 'sync.run')) {
+          send(res, 400, { error: 'Only currently implemented permission is sync.run.' }); return true;
+        }
+        const { error } = await db.from('dashboard_access').upsert({
+          email, permissions, is_active: true, updated_at: new Date().toISOString(), created_by: actorEmail
+        }, { onConflict: 'email' });
+        if (error) throw error;
+        await audit('access.granted_or_updated', email, { permissions });
+        const access = await getAccess(email);
+        send(res, 200, { data: access }); return true;
+      }
+
+      if (req.method === 'DELETE' && url.pathname === '/api/v1/dashboard/access') {
+        if (!isOwner) { send(res, 403, { error: 'Only the dashboard owner can revoke access.' }); return true; }
+        const email = String(url.searchParams.get('email') || '').trim().toLowerCase();
+        if (!validEmail(email) || email === ownerEmail) {
+          send(res, 400, { error: 'A valid non-owner email is required.' }); return true;
+        }
+        const { data, error } = await db.from('dashboard_access')
+          .update({ is_active: false, permissions: [], updated_at: new Date().toISOString() })
+          .eq('email', email).select('email').maybeSingle();
+        if (error) throw error;
+        await audit('access.revoked', email);
+        send(res, data ? 200 : 404, data ? { ok: true } : { error: 'Access record not found.' }); return true;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/v1/dashboard/audit') {
+        if (!isOwner) { send(res, 403, { error: 'Only the dashboard owner can view the audit log.' }); return true; }
+        const data = await rows(db.from('dashboard_audit_log')
+          .select('actor_email,action,target_email,details,created_at')
+          .order('created_at', { ascending: false }).limit(100));
+        send(res, 200, { data }); return true;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/v1/dashboard/sync/refresh') {
+        const access = await getAccess(actorEmail);
+        const canRun = isOwner || Boolean(access?.is_active && (access.permissions || []).includes('sync.run'));
+        if (!canRun) { send(res, 403, { error: 'You do not have permission to run syncs.' }); return true; }
+        const body = await readRequestJson(req);
+        if (body.confirmation !== 'RUN_FULL_SYNC') {
+          send(res, 400, { error: 'Explicit full-sync confirmation is required.' }); return true;
+        }
+        const runId = crypto.randomUUID();
+        const lockOwner = 'dashboard:' + runId;
+        const { data: claimed, error: lockError } = await db.rpc('claim_dashboard_sync_lock', {
+          p_owner: lockOwner, p_lease_seconds: 3600
+        });
+        if (lockError) throw lockError;
+        if (claimed !== true) {
+          send(res, 409, { error: 'Another sync operation is running. Try again after it finishes.' }); return true;
+        }
+        const { error: insertError } = await db.from('dashboard_control_runs').insert({
+          id: runId, action: 'full_sync', requested_by: actorEmail, status: 'running', started_at: new Date().toISOString()
+        });
+        if (insertError) {
+          await db.rpc('release_dashboard_sync_lock', { p_owner: lockOwner });
+          throw insertError;
+        }
+        await audit('sync.full_refresh.started', actorEmail, { runId });
+        void (async () => {
+          let status = 'failed';
+          let message = 'Sync did not finish.';
+          try {
+            const result = await refreshNow();
+            if (result?.busy) { status = 'busy'; message = result.message || 'Ponyo is busy.'; }
+            else {
+              const values = Object.values(result?.results || {});
+              const failures = values.filter(value => value == null).length;
+              status = failures ? 'failed' : 'completed';
+              message = failures ? 'Full sync finished with ' + failures + ' failed job(s).' : 'Full sync completed successfully.';
+            }
+          } catch (error) {
+            message = String(error?.message || 'Sync failed').slice(0, 200);
+          } finally {
+            await db.from('dashboard_control_runs').update({
+              status, message, finished_at: new Date().toISOString()
+            }).eq('id', runId);
+            await db.rpc('release_dashboard_sync_lock', { p_owner: lockOwner });
+            await audit('sync.full_refresh.' + status, actorEmail, { runId, message }).catch(() => {});
+          }
+        })();
+        send(res, 202, { data: { id: runId, status: 'running', message: 'Full sync accepted. Check status for progress.' } }); return true;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/api/v1/dashboard/sync/refresh-status') {
+        const runId = String(url.searchParams.get('id') || '');
+        if (!/^[0-9a-f-]{36}$/i.test(runId)) { send(res, 400, { error: 'A valid run ID is required.' }); return true; }
+        const access = await getAccess(actorEmail);
+        if (!isOwner && !(access?.is_active && (access.permissions || []).includes('sync.run'))) {
+          send(res, 403, { error: 'You do not have permission to view control-run status.' }); return true;
+        }
+        const { data, error } = await db.from('dashboard_control_runs')
+          .select('id,action,requested_by,status,message,started_at,finished_at').eq('id', runId).maybeSingle();
+        if (error) throw error;
+        if (!data) { send(res, 404, { error: 'Run not found.' }); return true; }
+        send(res, 200, { data }); return true;
+      }
+
+      send(res, 404, { error: 'Not found' }); return true;
+    }
+
     if (req.method === 'GET' && url.pathname === '/api/v1/operations/summary') {
       // Read-only operational view for the private control panel. Never expose
       // raw details or Discord identifiers from the publication ledger.
