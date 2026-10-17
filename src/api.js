@@ -810,22 +810,33 @@ export async function handleApi(req, res, url) {
 
     if (req.method === 'POST' && url.pathname === '/api/v1/sync/refresh') {
       // Coordinate manual API refreshes with scheduled and dashboard syncs
-      // across all Ponyo instances using the same database-backed lock.
+      // across all Ponyo instances when the shared-lock migration is installed.
+      // Before migration, preserve the existing in-process refresh behavior.
       const lockOwner = 'api:' + crypto.randomUUID();
       const { data: claimed, error: lockError } = await db.rpc('claim_dashboard_sync_lock', {
         p_owner: lockOwner, p_lease_seconds: 3600
       });
-      if (lockError) throw lockError;
-      if (claimed !== true) {
+      let locked = false;
+      if (lockError) {
+        if (/claim_dashboard_sync_lock|PGRST202|42883|could not find the function/i.test(String(lockError.message || ''))) {
+          console.error('[sync] shared-lock migration is not installed; using the existing in-process lock for manual API refresh');
+        } else {
+          throw lockError;
+        }
+      } else if (claimed !== true) {
         send(res, 409, { error: 'Another sync operation is running. Try again after it finishes.' });
         return true;
+      } else {
+        locked = true;
       }
       try {
         const details = await refreshNow();
         send(res, details.busy ? 409 : 200, { data: details });
       } finally {
-        const { error: releaseError } = await db.rpc('release_dashboard_sync_lock', { p_owner: lockOwner });
-        if (releaseError) console.error('[sync] failed to release manual API sync lock:', releaseError.message);
+        if (locked) {
+          const { error: releaseError } = await db.rpc('release_dashboard_sync_lock', { p_owner: lockOwner });
+          if (releaseError) console.error('[sync] failed to release manual API sync lock:', releaseError.message);
+        }
       }
       return true;
     }
