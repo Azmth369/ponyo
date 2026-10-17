@@ -74,6 +74,23 @@ For a local dashboard smoke test:
 2. Run `npm start` from this directory.
 3. Check `http://localhost:10000/health`, then `http://localhost:10000`.
 
+## Phase 5 pre-deployment and rollback checklist
+
+Before making the PR ready for review:
+1. Confirm the PR checks are green on the exact latest commit.
+2. Review the migration SQL and confirm the target Supabase project and migration order.
+3. Create the dashboard as a **separate** Render service; leave the current Ponyo service and its environment untouched.
+4. Verify `/health` returns OK, production responses include HSTS, and sign-in works only for approved Supabase Auth accounts.
+5. Test three accounts: owner, view-only user, and a user with one explicit permission. Verify revoked access stops working on the next request.
+6. Verify a sync attempt is denied without `sync.run`, and report actions are denied without `reports.manage`.
+7. Test report pause/enable and retry against a safe test event before enabling real report controls.
+
+Rollback:
+- If dashboard startup or smoke tests fail, suspend the **dashboard service only**. The existing Ponyo bot should continue running independently.
+- If any control API or permission behavior is unexpected, remove the dashboard service's control-key environment variable to stop its authenticated control requests, then investigate. Do not rotate or remove the existing `PONYO_API_KEY` as a rollback step.
+- Do not automatically drop the additive tables or functions during rollback. Keep audit records and access data intact until an explicit database rollback plan has been reviewed.
+- Never use production Discord report retry as a test. Verify ambiguous send outcomes in Discord before any manual retry.
+
 ## Safety boundaries and limitations
 
 - The dashboard must be deployed as a separate service.
