@@ -66,7 +66,7 @@ begin
 
   return to_jsonb(saved);
 end;
-$;
+$$;
 
 create or replace function public.revoke_dashboard_access(
   p_actor_email text, p_email text
@@ -92,7 +92,7 @@ begin
 
   return jsonb_build_object('email', saved.email, 'is_active', saved.is_active);
 end;
-$;
+$$;
 
 revoke all on function public.grant_dashboard_access(text, text, text[]) from public, anon, authenticated;
 revoke all on function public.revoke_dashboard_access(text, text) from public, anon, authenticated;
