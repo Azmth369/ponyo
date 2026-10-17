@@ -54,7 +54,7 @@ export async function handleApi(req, res, url) {
       const ownerEmail = String(process.env.DASHBOARD_OWNER_EMAIL || '').trim().toLowerCase();
       const actorEmail = String(req.headers['x-dashboard-user-email'] || '').trim().toLowerCase();
       const isOwner = Boolean(ownerEmail && actorEmail === ownerEmail);
-      const validEmail = value => /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(String(value || ''));
+      const validEmail = value => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ''));
       const getAccess = async email => {
         if (email === ownerEmail && ownerEmail) return { email, permissions: ['*'], is_active: true, role: 'owner' };
         const { data, error } = await db.from('dashboard_access')
@@ -74,9 +74,10 @@ export async function handleApi(req, res, url) {
         const email = String(url.searchParams.get('email') || '').trim().toLowerCase();
         if (!validEmail(email)) { send(res, 400, { error: 'A valid email is required.' }); return true; }
         const access = await getAccess(email);
-        return send(res, 200, access && access.is_active !== false
+        send(res, 200, access && access.is_active !== false
           ? { approved: true, email, role: access.role || 'viewer', permissions: access.permissions || [] }
           : { approved: false, email, role: null, permissions: [] });
+        return true;
       }
 
       if (!actorEmail || !validEmail(actorEmail)) {
