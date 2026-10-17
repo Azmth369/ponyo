@@ -23,7 +23,7 @@ BEGIN
 END $$;
 
 -- A failed audit insert must roll back the permission grant in the same transaction.
-CREATE FUNCTION public.test_fail_dashboard_grant_audit() RETURNS trigger LANGUAGE plpgsql AS $$$
+CREATE FUNCTION public.test_fail_dashboard_grant_audit() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.action = 'access.granted_or_updated' THEN RAISE EXCEPTION 'intentional audit failure'; END IF;
   RETURN NEW;
@@ -98,7 +98,7 @@ BEGIN
   END IF;
 END $$;
 
-CREATE FUNCTION public.test_fail_report_audit() RETURNS trigger LANGUAGE plpgsql AS $
+CREATE FUNCTION public.test_fail_report_audit() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF NEW.action = 'report.retry_requested' THEN RAISE EXCEPTION 'intentional report audit failure'; END IF;
   RETURN NEW;
