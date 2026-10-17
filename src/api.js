@@ -103,11 +103,10 @@ export async function handleApi(req, res, url) {
         if (permissions.some(permission => permission !== 'sync.run')) {
           send(res, 400, { error: 'Only currently implemented permission is sync.run.' }); return true;
         }
-        const { error } = await db.from('dashboard_access').upsert({
-          email, permissions, is_active: true, updated_at: new Date().toISOString(), created_by: actorEmail
-        }, { onConflict: 'email' });
+        const { error } = await db.rpc('grant_dashboard_access', {
+          p_actor_email: actorEmail, p_email: email, p_permissions: permissions
+        });
         if (error) throw error;
-        await audit('access.granted_or_updated', email, { permissions });
         const access = await getAccess(email);
         send(res, 200, { data: access }); return true;
       }
@@ -118,11 +117,10 @@ export async function handleApi(req, res, url) {
         if (!validEmail(email) || email === ownerEmail) {
           send(res, 400, { error: 'A valid non-owner email is required.' }); return true;
         }
-        const { data, error } = await db.from('dashboard_access')
-          .update({ is_active: false, permissions: [], updated_at: new Date().toISOString() })
-          .eq('email', email).select('email').maybeSingle();
+        const { data, error } = await db.rpc('revoke_dashboard_access', {
+          p_actor_email: actorEmail, p_email: email
+        });
         if (error) throw error;
-        await audit('access.revoked', email);
         send(res, data ? 200 : 404, data ? { ok: true } : { error: 'Access record not found.' }); return true;
       }
 
