@@ -43,8 +43,8 @@ export async function handleApi(req, res, url) {
       // Read-only operational view for the private control panel. Never expose
       // raw details or Discord identifiers from the publication ledger.
       const safeMessage = value => String(value ?? '')
-        .replace(/Bearer\\s+[A-Za-z0-9._-]+/gi, 'Bearer [redacted]')
-        .replace(/(token|secret|password|apikey|api_key)\\s*[:=]\\s*[^,\\s]+/gi, '$1=[redacted]')
+        .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [redacted]')
+        .replace(/(token|secret|password|apikey|api_key)\s*[:=]\s*[^,\s]+/gi, '$1=[redacted]')
         .slice(0, 220);
       const syncRuns = await rows(
         db.from('sync_runs')
