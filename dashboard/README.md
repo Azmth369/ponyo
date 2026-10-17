@@ -1,4 +1,4 @@
-# Ponyo Control Panel — Phases 1–4
+# Ponyo Control Panel — Phases 1–5
 
 A separate Node.js dashboard for the existing Ponyo service. Deploy it as a **new Render web service**; never replace or modify the existing bot service as part of dashboard deployment.
 
@@ -10,6 +10,7 @@ A separate Node.js dashboard for the existing Ponyo service. Deploy it as a **ne
 - Owner-only access grants/revocation and audit log
 - Explicitly confirmed full-sync action, protected by a separate control API key and a shared database lock
 - Phase 4 per-report pause/enable controls and manual retry for eligible failed reports, guarded by the `reports.manage` permission
+- Phase 5 security hardening: bounded IP-and-account login throttling, safe malformed-cookie handling, production HSTS, restrictive CSP, and additional browser security headers
 
 ## Render setup
 
