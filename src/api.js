@@ -100,8 +100,8 @@ export async function handleApi(req, res, url) {
         if (!validEmail(email) || email === ownerEmail) {
           send(res, 400, { error: 'Enter a valid non-owner email address.' }); return true;
         }
-        if (permissions.some(permission => permission !== 'sync.run')) {
-          send(res, 400, { error: 'Only currently implemented permission is sync.run.' }); return true;
+        if (permissions.some(permission => !['sync.run', 'reports.manage'].includes(permission))) {
+          send(res, 400, { error: 'Unsupported permission. Allowed permissions are sync.run and reports.manage.' }); return true;
         }
         const { error } = await db.rpc('grant_dashboard_access', {
           p_actor_email: actorEmail, p_email: email, p_permissions: permissions
@@ -130,6 +130,44 @@ export async function handleApi(req, res, url) {
           .select('actor_email,action,target_email,details,created_at')
           .order('created_at', { ascending: false }).limit(100));
         send(res, 200, { data }); return true;
+      }
+
+      const canManageReports = async () => {
+        if (isOwner) return true;
+        const access = await getAccess(actorEmail);
+        return Boolean(access?.is_active && (access.permissions || []).includes('reports.manage'));
+      };
+
+      if (req.method === 'POST' && url.pathname === '/api/v1/dashboard/reports/enabled') {
+        if (!(await canManageReports())) { send(res, 403, { error: 'You do not have permission to manage Discord reports.' }); return true; }
+        const body = await readRequestJson(req);
+        const eventType = String(body.event_type || '').trim();
+        const eventUid = String(body.event_uid || '').trim();
+        if (!['war', 'capital_raid'].includes(eventType) || !eventUid || eventUid.length > 200 || typeof body.enabled !== 'boolean') {
+          send(res, 400, { error: 'Provide a valid report type, event ID, and enabled boolean.' }); return true;
+        }
+        const { data, error } = await db.rpc('set_event_report_enabled', {
+          p_actor_email: actorEmail, p_event_type: eventType, p_event_uid: eventUid, p_enabled: body.enabled
+        });
+        if (error) throw error;
+        if (!data) { send(res, 409, { error: 'Report not found or already published; its setting was not changed.' }); return true; }
+        send(res, 200, { data }); return true;
+      }
+
+      if (req.method === 'POST' && url.pathname === '/api/v1/dashboard/reports/retry') {
+        if (!(await canManageReports())) { send(res, 403, { error: 'You do not have permission to retry Discord reports.' }); return true; }
+        const body = await readRequestJson(req);
+        const eventType = String(body.event_type || '').trim();
+        const eventUid = String(body.event_uid || '').trim();
+        if (!['war', 'capital_raid'].includes(eventType) || !eventUid || eventUid.length > 200) {
+          send(res, 400, { error: 'Provide a valid report type and event ID.' }); return true;
+        }
+        const { data, error } = await db.rpc('retry_event_report', {
+          p_actor_email: actorEmail, p_event_type: eventType, p_event_uid: eventUid
+        });
+        if (error) throw error;
+        if (!data) { send(res, 409, { error: 'Only enabled, failed, never-published reports can be retried. Published or in-flight reports are not retryable.' }); return true; }
+        send(res, 202, { data }); return true;
       }
 
       if (req.method === 'POST' && url.pathname === '/api/v1/dashboard/sync/refresh') {
@@ -229,7 +267,7 @@ export async function handleApi(req, res, url) {
       );
       const reports = await rows(
         db.from('event_report_publications')
-          .select('event_type,event_uid,expected_end,state,attempts,last_error,published_at,created_at,updated_at')
+          .select('event_type,event_uid,expected_end,state,enabled,attempts,last_error,published_at,created_at,updated_at')
           .order('expected_end', { ascending: false })
           .limit(30)
       );
@@ -247,6 +285,7 @@ export async function handleApi(req, res, url) {
           event_uid: report.event_uid,
           expected_end: report.expected_end,
           state: report.state,
+          enabled: report.enabled !== false,
           attempts: report.attempts,
           last_error: safeMessage(report.last_error),
           published_at: report.published_at,
