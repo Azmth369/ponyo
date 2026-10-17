@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#10141d">
+<title>Ponyo Control Panel</title><link rel="stylesheet" href="/styles.css"><script src="/app.js" defer></script>
+</head>
+<body>
+<main id="login-view" class="login-shell"><section class="login-card">
+<div class="brand-mark">P</div><p class="eyebrow">CLAN OPERATIONS</p><h1>Ponyo Control Panel</h1>
+<p class="muted">A private place to monitor clan data, sync health and Discord reports.</p>
+<div id="setup-notice" class="notice hidden" role="status"></div>
+<form id="login-form"><label for="email">Administrator email</label><input id="email" name="email" type="email" autocomplete="username" required maxlength="254" placeholder="you@example.com">
+<label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required maxlength="1024" placeholder="Your Supabase Auth password">
+<button id="login-button" class="primary-button" type="submit">Sign in securely</button><p id="login-error" class="error-text" role="alert"></p></form>
+<p class="fine-print">Access is restricted to accounts approved by the dashboard owner.</p>
+</section></main>
+<div id="app-view" class="app-shell hidden">
+<aside class="sidebar"><a class="brand" href="/" aria-label="Ponyo Control Panel home"><span class="brand-mark small">P</span><span><strong>Ponyo</strong><small>Control Panel</small></span></a>
+<nav aria-label="Dashboard sections">
+<a class="nav-link active" href="#overview" data-section="overview">◫ Overview</a><a class="nav-link" href="#syncs" data-section="syncs">↻ Sync health</a><a class="nav-link" href="#reports" data-section="reports">▤ Discord reports</a><a class="nav-link" href="#clan" data-section="clan">♙ Clan analytics</a><a class="nav-link" href="#history" data-section="history">◷ War & raid history</a>
+</nav><div class="sidebar-note"><span class="status-dot"></span> Read-only mode<small>Management controls arrive after review.</small></div></aside>
+<main class="main-content">
+<header class="topbar"><div><p class="eyebrow">PONYO / OPERATIONS</p><h1 id="page-title">Overview</h1></div><div class="account-area"><span id="user-role" class="role-pill">Administrator</span><span id="user-email" class="user-email"></span><button id="refresh-button" class="quiet-button" type="button">↻ Refresh</button><button id="logout-button" class="quiet-button" type="button">Sign out</button></div></header>
+<div id="page-error" class="notice hidden" role="status"></div><div id="last-updated" class="updated-line">Loading latest data…</div>
+<section id="section-overview" class="dashboard-section"><div class="section-heading"><div><h2>At a glance</h2><p>Live status from Ponyo and stored clan records.</p></div><span class="live-label"><span class="status-dot"></span> READ ONLY</span></div>
+<div id="overview-cards" class="metric-grid"><article class="metric-card skeleton"></article><article class="metric-card skeleton"></article><article class="metric-card skeleton"></article><article class="metric-card skeleton"></article></div>
+<div class="content-grid"><article class="panel"><div class="panel-heading"><div><h3>Current Clan War</h3><p>Live Clash of Clans API</p></div><span class="panel-icon">⚔</span></div><div id="current-war" class="panel-body"><p class="muted">Loading war status…</p></div></article>
+<article class="panel"><div class="panel-heading"><div><h3>Capital Raid</h3><p>Latest stored weekend</p></div><span class="panel-icon">⌂</span></div><div id="current-raid" class="panel-body"><p class="muted">Loading raid data…</p></div></article></div>
+<article class="panel"><div class="panel-heading"><div><h3>System health</h3><p>Recent job outcomes and report state</p></div><a href="#syncs" class="text-link">View syncs →</a></div><div id="health-summary" class="panel-body"><p class="muted">Loading operational status…</p></div></article></section>
+<section id="section-syncs" class="dashboard-section hidden"><div class="section-heading"><div><h2>Sync health</h2><p>Recent scheduler executions. Controls are disabled in this release.</p></div></div><article class="panel"><div id="sync-table" class="table-wrap"><p class="muted">Loading sync history…</p></div></article></section>
+<section id="section-reports" class="dashboard-section hidden"><div class="section-heading"><div><h2>Automatic Discord reports</h2><p>Publication ledger for Clan War and Capital Raid reports.</p></div></div><div id="report-summary" class="metric-grid compact-grid"></div><article class="panel"><div id="report-table" class="table-wrap"><p class="muted">Loading report history…</p></div></article><p class="callout">This page does not publish, retry, or modify reports. Those controls will be added only after the safety review in a later phase.</p></section>
+<section id="section-clan" class="dashboard-section hidden"><div class="section-heading"><div><h2>Clan analytics</h2><p>Current roster totals and observed changes over the last 24 hours.</p></div></div><div id="clan-cards" class="metric-grid"></div><div class="content-grid">
+<article class="panel"><div class="panel-heading"><div><h3>Town Hall distribution</h3><p>Current roster</p></div></div><div id="townhall-chart" class="panel-body"></div></article>
+<article class="panel"><div class="panel-heading"><div><h3>Activity highlights</h3><p>Snapshot-based, not exact login times</p></div></div><div id="activity-highlights" class="panel-body"></div></article></div>
+<article class="panel"><div class="panel-heading"><div><h3>Top donors</h3><p>Donation counter increase in the last 24 hours where a baseline exists</p></div></div><div id="donor-table" class="table-wrap"></div></article></section>
+<section id="section-history" class="dashboard-section hidden"><div class="section-heading"><div><h2>War & raid history</h2><p>Stored history is shown separately from live war status.</p></div></div>
+<article class="panel"><div class="panel-heading"><div><h3>Recent Clan Wars</h3><p>Regular wars, not CWL rounds</p></div></div><div id="war-history-table" class="table-wrap"></div></article>
+<article class="panel"><div class="panel-heading"><div><h3>Recent Capital Raids</h3><p>Stored raid weekends</p></div></div><div id="raid-history-table" class="table-wrap"></div></article>
+<article class="panel"><div class="panel-heading"><div><h3>Latest CWL season</h3><p>Only seasons verifiable against this clan's tag</p></div></div><div id="cwl-history" class="panel-body"></div></article></section>
+<footer><span>Ponyo Control Panel · Phase 1–2</span><span>Private · Read-only · Secrets stay server-side</span></footer>
+</main></div><div id="toast" class="toast hidden" role="status"></div>
+</body></html>
