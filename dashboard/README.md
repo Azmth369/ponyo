@@ -61,14 +61,17 @@ The owner is identified by `DASHBOARD_OWNER_EMAIL` and cannot be revoked through
 
 Never configure the Supabase service-role key on the dashboard service. The anon key is used server-side for Auth requests and is not sent to browser code. API keys and access tokens must remain server-side.
 
-## Local checks
+## Local checks and automated validation
 
-From this directory:
+From the repository root, run `npm test`; this includes the dashboard authorization integration tests alongside the existing Ponyo tests. Run `npm --prefix dashboard run check` for dashboard syntax checks.
 
-1. Run `npm run check`.
-2. Set required environment variables in your local environment; do not commit a `.env` file.
-3. Run `npm start`.
-4. Check `http://localhost:10000/health`, then `http://localhost:10000`.
+The GitHub Actions workflow also starts a disposable PostgreSQL 16 instance, applies the dashboard migration, and runs `supabase/tests/dashboard_control_panel_smoke.sql` to check grant/revoke audit behavior, atomic rollback when audit logging fails, and lock ownership/concurrency. These tests do not connect to or modify production Supabase.
+
+For a local dashboard smoke test:
+
+1. Set required environment variables in your local environment; do not commit a `.env` file.
+2. Run `npm start` from this directory.
+3. Check `http://localhost:10000/health`, then `http://localhost:10000`.
 
 ## Safety boundaries and limitations
 
