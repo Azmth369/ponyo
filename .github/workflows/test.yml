@@ -17,7 +17,7 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm install
-      - name: Check dashboard syntax
-        run: npm --prefix dashboard run check
+      - name: Check dashboard and scheduler syntax
+        run: npm --prefix dashboard run check && node --check src/api.js && node --check src/index.js
       - name: Run tests
         run: npm test
