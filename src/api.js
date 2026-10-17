@@ -162,12 +162,16 @@ export async function handleApi(req, res, url) {
           await audit('sync.full_refresh.started', actorEmail, { runId });
         } catch (auditError) {
           // Never start a privileged sync when its audit entry cannot be recorded.
-          await db.from('dashboard_control_runs').update({
-            status: 'failed',
-            message: 'Audit logging failed; sync was not started.',
-            finished_at: new Date().toISOString()
-          }).eq('id', runId).catch(() => {});
-          await db.rpc('release_dashboard_sync_lock', { p_owner: lockOwner }).catch(() => {});
+          try {
+            await db.from('dashboard_control_runs').update({
+              status: 'failed',
+              message: 'Audit logging failed; sync was not started.',
+              finished_at: new Date().toISOString()
+            }).eq('id', runId);
+          } catch {}
+          try {
+            await db.rpc('release_dashboard_sync_lock', { p_owner: lockOwner });
+          } catch {}
           throw auditError;
         }
         void (async () => {
