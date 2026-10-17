@@ -48,7 +48,7 @@ returns jsonb
 language plpgsql
 security definer
 set search_path = public
-as $
+as $$
 declare saved public.dashboard_access;
 begin
   insert into public.dashboard_access(email, permissions, is_active, created_by, updated_at)
@@ -75,7 +75,7 @@ returns jsonb
 language plpgsql
 security definer
 set search_path = public
-as $
+as $$
 declare saved public.dashboard_access;
 begin
   update public.dashboard_access
