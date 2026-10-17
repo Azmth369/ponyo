@@ -124,8 +124,15 @@ async function publishReadyEvents() {
         throw error;
       }
     } catch (error) {
-      console.error(`[reports] failed ${event.event_type} ${event.event_uid}:`, error?.message ?? error);
-      results.push({ event: event.event_uid, state: 'error', error: String(error?.message ?? error) });
+      const message = String(error?.message ?? error).slice(0, 1000);
+      // Stop automatic retry loops after any per-report preparation or send failure.
+      // A user with reports.manage can inspect the error and explicitly retry.
+      await db.from('event_report_publications')
+        .update({ state: 'failed', publishing_since: null, last_error: message, updated_at: new Date().toISOString() })
+        .eq('event_type', event.event_type).eq('event_uid', event.event_uid)
+        .in('state', ['ready', 'waiting_for_data']).eq('enabled', true);
+      console.error(`[reports] failed ${event.event_type} ${event.event_uid}:`, message);
+      results.push({ event: event.event_uid, state: 'error', error: message });
     }
   }
   return results;
