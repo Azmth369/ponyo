@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { db } from './db.js';
 import { syncClan, syncWar, syncHistory, syncCwl, run } from './sync.js';
 import { syncCapital } from './capitalSync.js';
 import { syncCapitalContributionSnapshots } from './contributionSync.js';
@@ -43,16 +44,43 @@ let syncRunning = false;
 // at most one pending run per job is retained while another sync is in progress.
 const pendingJobs = new Map();
 
+async function claimDistributedLock(owner) {
+  const { data, error } = await db.rpc('claim_dashboard_sync_lock', {
+    p_owner: owner, p_lease_seconds: 3600
+  });
+  if (error) throw error;
+  return data === true;
+}
+
+async function releaseDistributedLock(owner) {
+  const { error } = await db.rpc('release_dashboard_sync_lock', { p_owner: owner });
+  if (error) console.error('[sync] failed to release shared sync lock:', error.message);
+}
+
 async function flushPendingJobs() {
   if (syncRunning || pendingJobs.size === 0) return;
   const [name, fn] = pendingJobs.entries().next().value;
   pendingJobs.delete(name);
   syncRunning = true;
+  const lockOwner = `scheduler:${process.pid}:${name}`;
+  let locked = false;
+  let retryLater = false;
   try {
+    locked = await claimDistributedLock(lockOwner);
+    if (!locked) {
+      pendingJobs.set(name, fn);
+      retryLater = true;
+      console.log(`[sync] queued ${name}; another Ponyo instance owns the shared sync lock`);
+      return;
+    }
     await run(name, fn);
+  } catch (error) {
+    console.error(`[sync] scheduled job ${name} failed before execution:`, error.message);
   } finally {
+    if (locked) await releaseDistributedLock(lockOwner);
     syncRunning = false;
-    if (pendingJobs.size) await flushPendingJobs();
+    if (retryLater) setTimeout(() => { void flushPendingJobs(); }, 30000).unref();
+    else if (pendingJobs.size) await flushPendingJobs();
   }
 }
 
@@ -63,9 +91,19 @@ async function scheduleJob(name, fn) {
     return;
   }
   syncRunning = true;
+  const lockOwner = `scheduler:${process.pid}:${name}`;
+  let locked = false;
   try {
+    locked = await claimDistributedLock(lockOwner);
+    if (!locked) {
+      console.log(`[sync] deferred ${name}; another Ponyo instance owns the shared sync lock`);
+      return;
+    }
     await run(name, fn);
+  } catch (error) {
+    console.error(`[sync] scheduled job ${name} failed:`, error.message);
   } finally {
+    if (locked) await releaseDistributedLock(lockOwner);
     syncRunning = false;
     await flushPendingJobs();
   }
