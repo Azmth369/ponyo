@@ -1,4 +1,5 @@
 name: Test
+# Phase 4 adds report permission, retry, pause/enable, and PostgreSQL migration checks.
 
 on:
   push:
