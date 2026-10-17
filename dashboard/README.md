@@ -1,4 +1,4 @@
-# Ponyo Control Panel — Phases 1–3
+# Ponyo Control Panel — Phases 1–4
 
 A separate Node.js dashboard for the existing Ponyo service. Deploy it as a **new Render web service**; never replace or modify the existing bot service as part of dashboard deployment.
 
@@ -6,10 +6,10 @@ A separate Node.js dashboard for the existing Ponyo service. Deploy it as a **ne
 
 - Supabase Auth email/password sign-in and server-side session verification
 - Owner-managed allowlist and permissions; all non-owner accounts are view-only by default
-- Responsive overview, sync health, Discord report publication ledger, clan analytics, and war/CWL/Capital Raid history
+- Responsive overview, sync health, Discord report history, clan analytics, and war/CWL/Capital Raid history
 - Owner-only access grants/revocation and audit log
 - Explicitly confirmed full-sync action, protected by a separate control API key and a shared database lock
-- No Discord report retries or scheduler settings controls
+- Phase 4 per-report pause/enable controls and manual retry for eligible failed reports, guarded by the `reports.manage` permission
 
 ## Render setup
 
@@ -49,7 +49,7 @@ Keep the existing `PONYO_API_KEY` unchanged. Do not reuse it as the control key.
 
 ## Supabase migration and accounts
 
-Before enabling access management or manual sync, apply `supabase/migrations/20261018_dashboard_control_panel.sql` to the existing Ponyo Supabase project. The control endpoints fail closed if the required tables/RPC functions are missing.
+Before enabling dashboard controls, ensure `supabase/migrations/20261018030000_event_report_publications.sql` has been applied (the existing report scheduler already depends on this ledger). Apply `supabase/migrations/20261018_dashboard_control_panel.sql`, then `supabase/migrations/20261018120000_dashboard_report_management.sql` to the existing Ponyo Supabase project. The control endpoints fail closed if required tables/RPC functions are missing.
 
 1. Enable Email/Password sign-in in Supabase Auth.
 2. Create the owner account and any intended viewer accounts in Supabase Auth.
@@ -57,7 +57,7 @@ Before enabling access management or manual sync, apply `supabase/migrations/202
 4. The owner signs in and adds other users in **Access management**. Leave “Allow running full syncs” unchecked for view-only access.
 5. Test access grant/revocation and sync locking before production use.
 
-The owner is identified by `DASHBOARD_OWNER_EMAIL` and cannot be revoked through the access UI. Other accounts need an active access record. The only currently available non-owner permission is `sync.run`.
+The owner is identified by `DASHBOARD_OWNER_EMAIL` and cannot be revoked through the access UI. Other accounts need an active access record. Available non-owner permissions are `sync.run` and `reports.manage`; leave both unchecked for view-only access.
 
 Never configure the Supabase service-role key on the dashboard service. The anon key is used server-side for Auth requests and is not sent to browser code. API keys and access tokens must remain server-side.
 
@@ -77,8 +77,10 @@ For a local dashboard smoke test:
 
 - The dashboard must be deployed as a separate service.
 - Apply the migration and configure both services before testing control features.
-- Full sync can make multiple game API requests; the confirmation does not publish or retry Discord reports.
-- No report retries or scheduler-setting changes are enabled.
+- Full sync can make multiple game API requests; it does not publish Discord reports.
+- A report retry is allowed only for an explicitly failed report that is enabled and has no recorded publication/message ID. Published reports are not retryable.
+- Failed report sends stop automatic retries and require a permitted user to request a manual retry. The stable Discord nonce and `enforce_nonce` remain enabled to mitigate duplicate posts after ambiguous network outcomes.
+- Pausing a report prevents future scheduler attempts but cannot cancel a Discord request already in progress. Reports waiting for data are shown separately and are checked again by the scheduler.
 - Session lifetime is capped at one hour.
 - Historical data may be incomplete; missing values should be shown as unavailable rather than fabricated.
 - No Render management credentials are used or exposed.
