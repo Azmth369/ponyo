@@ -59,7 +59,7 @@ function sameOrigin(req) {
   if (!origin) return false;
   try {
     const originUrl = new URL(origin);
-    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    const host = req.headers.host;
     return originUrl.host === host;
   } catch {
     return false;
