@@ -35,16 +35,11 @@ jobs:
         run: npm --prefix dashboard run check && node --check src/api.js && node --check src/index.js
       - name: Run test suite including dashboard authorization
         run: npm test
-      - name: Install PostgreSQL client
-        run: sudo apt-get update && sudo apt-get install --yes postgresql-client
       - name: Validate dashboard migration on disposable PostgreSQL
-        env:
-          PGHOST: 127.0.0.1
-          PGPORT: 5432
-          PGUSER: postgres
-          PGPASSWORD: postgres
-          PGDATABASE: ponyo_test
+        shell: bash
         run: |
-          psql -v ON_ERROR_STOP=1 -c "CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;"
-          psql -v ON_ERROR_STOP=1 -f supabase/migrations/20261018_dashboard_control_panel.sql
-          psql -v ON_ERROR_STOP=1 -f supabase/tests/dashboard_control_panel_smoke.sql
+          container_id="$(docker ps --filter 'ancestor=postgres:16' --format '{{.ID}}' | head -n 1)"
+          test -n "$container_id"
+          docker exec "$container_id" psql -U postgres -d ponyo_test -v ON_ERROR_STOP=1 -c "CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;"
+          docker exec -i "$container_id" psql -U postgres -d ponyo_test -v ON_ERROR_STOP=1 < supabase/migrations/20261018_dashboard_control_panel.sql
+          docker exec -i "$container_id" psql -U postgres -d ponyo_test -v ON_ERROR_STOP=1 < supabase/tests/dashboard_control_panel_smoke.sql
