@@ -10,6 +10,9 @@ const SESSION_COOKIE = 'ponyo_dashboard_session';
 const SESSION_MAX_AGE = 60 * 60;
 const MAX_BODY_BYTES = 16 * 1024;
 const loginAttempts = new Map();
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_LIMIT = 10;
+const MAX_LOGIN_KEYS = 5000;
 
 const ownerEmail = (process.env.DASHBOARD_OWNER_EMAIL || '').trim().toLowerCase();
 
@@ -28,13 +31,25 @@ function isConfigured() {
   return Object.values(configuration()).every(Boolean);
 }
 
+function securityHeaders() {
+  return {
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer',
+    'X-DNS-Prefetch-Control': 'off',
+    'Cross-Origin-Opener-Policy': 'same-origin',
+    'Cross-Origin-Resource-Policy': 'same-origin',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+    'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+    ...(process.env.NODE_ENV === 'production' ? { 'Strict-Transport-Security': 'max-age=31536000; includeSubDomains' } : {})
+  };
+}
+
 function send(res, status, body, headers = {}) {
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
-    'X-Content-Type-Options': 'nosniff',
-    'X-Frame-Options': 'DENY',
-    'Referrer-Policy': 'no-referrer',
+    ...securityHeaders(),
     ...headers
   });
   res.end(JSON.stringify(body));
@@ -50,7 +65,7 @@ function readCookie(req, name) {
   for (const item of header.split(';')) {
     const index = item.indexOf('=');
     if (index < 0) continue;
-    if (item.slice(0, index).trim() === name) return decodeURIComponent(item.slice(index + 1).trim());
+    if (item.slice(0, index).trim() === name) { try { return decodeURIComponent(item.slice(index + 1).trim()); } catch { return ''; } }
   }
   return '';
 }
@@ -218,10 +233,7 @@ async function serveStatic(pathname, res) {
     res.writeHead(200, {
       'Content-Type': contentTypes[extname(relative)] || 'application/octet-stream',
       'Cache-Control': relative === 'index.html' ? 'no-store' : 'public, max-age=300',
-      'X-Content-Type-Options': 'nosniff',
-      'X-Frame-Options': 'DENY',
-      'Referrer-Policy': 'no-referrer',
-      'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+      ...securityHeaders()
     });
     res.end(content);
     return true;
@@ -230,22 +242,31 @@ async function serveStatic(pathname, res) {
   }
 }
 
-function allowLoginAttempt(ip) {
+function allowLoginAttempt(ip, email) {
   const now = Date.now();
-  const existing = loginAttempts.get(ip) || [];
-  const recent = existing.filter(time => now - time < 15 * 60 * 1000);
-  if (recent.length >= 10) {
-    loginAttempts.set(ip, recent);
-    return false;
+  // Expire old entries and cap memory use under distributed login abuse.
+  for (const [key, times] of loginAttempts) {
+    const recent = times.filter(time => now - time < LOGIN_WINDOW_MS);
+    if (recent.length) loginAttempts.set(key, recent);
+    else loginAttempts.delete(key);
   }
-  recent.push(now);
-  loginAttempts.set(ip, recent);
+  const keys = ['ip:' + ip, 'email:' + email].filter(key => key.length > 4);
+  if (keys.some(key => (loginAttempts.get(key) || []).length >= LOGIN_LIMIT)) return false;
+  for (const key of keys) {
+    const recent = loginAttempts.get(key) || [];
+    recent.push(now);
+    loginAttempts.set(key, recent);
+  }
+  while (loginAttempts.size > MAX_LOGIN_KEYS) {
+    loginAttempts.delete(loginAttempts.keys().next().value);
+  }
   return true;
 }
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', 'http://localhost');
-  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown').split(',')[0].trim();
+  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',').map(value => value.trim()).filter(Boolean);
+  const ip = forwarded.length ? forwarded[forwarded.length - 1] : String(req.socket.remoteAddress || 'unknown');
 
   if (req.method === 'GET' && url.pathname === '/health') {
     return send(res, 200, { ok: true, service: 'ponyo-control-panel', configured: isConfigured() });
@@ -256,12 +277,12 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && url.pathname === '/api/login') {
     if (!sameOrigin(req)) return send(res, 403, { error: 'Request origin rejected' });
     if (!isConfigured()) return send(res, 503, { error: 'Dashboard setup is incomplete. Ask the owner to finish the server configuration.' });
-    if (!allowLoginAttempt(ip)) return send(res, 429, { error: 'Too many login attempts. Please wait 15 minutes and try again.' });
     try {
       const body = await readJson(req);
       const email = String(body.email || '').trim().toLowerCase();
       const password = String(body.password || '');
       if (!email || !password || password.length > 1024) return send(res, 400, { error: 'Enter your email and password.' });
+      if (!allowLoginAttempt(ip, email)) return send(res, 429, { error: 'Too many login attempts. Please wait 15 minutes and try again.' });
       const initialAccess = await accessForEmail(email);
       if (!initialAccess) return send(res, 403, { error: 'This account has not been approved by the dashboard owner.' });
       const session = await supabaseRequest('/auth/v1/token?grant_type=password', { method: 'POST', body: { email, password } });
