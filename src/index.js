@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { db } from './db.js';
 import { syncClan, syncWar, syncHistory, syncCwl, run } from './sync.js';
 import { syncCapital } from './capitalSync.js';
 import { syncCapitalContributionSnapshots } from './contributionSync.js';
@@ -42,17 +43,58 @@ let syncRunning = false;
 // Coalesce repeated ticks by job name. No scheduled sync is silently discarded;
 // at most one pending run per job is retained while another sync is in progress.
 const pendingJobs = new Map();
+let sharedLockAvailable = true;
+
+async function claimDistributedLock(owner) {
+  if (!sharedLockAvailable) return true;
+  const { data, error } = await db.rpc('claim_dashboard_sync_lock', {
+    p_owner: owner, p_lease_seconds: 3600
+  });
+  if (error) {
+    if (/claim_dashboard_sync_lock|PGRST202|42883|could not find the function/i.test(String(error.message || ''))) {
+      sharedLockAvailable = false;
+      console.error('[sync] shared-lock migration is not installed; using the existing in-process lock until the service restarts after migration');
+      return true;
+    }
+    throw error;
+  }
+  return data === true;
+}
+
+async function releaseDistributedLock(owner) {
+  if (!sharedLockAvailable) return;
+  const { error } = await db.rpc('release_dashboard_sync_lock', { p_owner: owner });
+  if (error && /release_dashboard_sync_lock|PGRST202|42883|could not find the function/i.test(String(error.message || ''))) {
+    sharedLockAvailable = false;
+    return;
+  }
+  if (error) console.error('[sync] failed to release shared sync lock:', error.message);
+}
 
 async function flushPendingJobs() {
   if (syncRunning || pendingJobs.size === 0) return;
   const [name, fn] = pendingJobs.entries().next().value;
   pendingJobs.delete(name);
   syncRunning = true;
+  const lockOwner = `scheduler:${process.pid}:${name}`;
+  let locked = false;
+  let retryLater = false;
   try {
+    locked = await claimDistributedLock(lockOwner);
+    if (!locked) {
+      pendingJobs.set(name, fn);
+      retryLater = true;
+      console.log(`[sync] queued ${name}; another Ponyo instance owns the shared sync lock`);
+      return;
+    }
     await run(name, fn);
+  } catch (error) {
+    console.error(`[sync] scheduled job ${name} failed before execution:`, error.message);
   } finally {
+    if (locked) await releaseDistributedLock(lockOwner);
     syncRunning = false;
-    if (pendingJobs.size) await flushPendingJobs();
+    if (retryLater) setTimeout(() => { void flushPendingJobs(); }, 30000).unref();
+    else if (pendingJobs.size) await flushPendingJobs();
   }
 }
 
@@ -63,9 +105,19 @@ async function scheduleJob(name, fn) {
     return;
   }
   syncRunning = true;
+  const lockOwner = `scheduler:${process.pid}:${name}`;
+  let locked = false;
   try {
+    locked = await claimDistributedLock(lockOwner);
+    if (!locked) {
+      console.log(`[sync] deferred ${name}; another Ponyo instance owns the shared sync lock`);
+      return;
+    }
     await run(name, fn);
+  } catch (error) {
+    console.error(`[sync] scheduled job ${name} failed:`, error.message);
   } finally {
+    if (locked) await releaseDistributedLock(lockOwner);
     syncRunning = false;
     await flushPendingJobs();
   }
@@ -93,29 +145,39 @@ export async function refreshNow() {
 export async function startSyncScheduler() {
   if (syncRunning) return;
   syncRunning = true;
+  const startupLockOwner = `startup:${process.pid}`;
+  let startupLocked = false;
   try {
-    try {
-      const migrated = await migrateLegacyUids();
-      if (migrated) console.log('[sync] legacy UID migration complete', migrated);
-    } catch (error) {
-      console.error('[sync] legacy UID migration failed; continuing with existing UIDs', error);
-    }
-
-    await run('startup', async () => {
-      for (const [name, enabled, fn] of startupJobs) {
-        if (!enabled) {
-          console.log(`[sync] startup ${name} disabled`);
-          continue;
-        }
-        try {
-          const details = await fn();
-          console.log(`[sync] startup ${name} complete`, details);
-        } catch (error) {
-          console.error(`[sync] startup ${name} failed`, error);
-        }
+    startupLocked = await claimDistributedLock(startupLockOwner);
+    if (!startupLocked) {
+      console.log('[sync] startup sync deferred; another Ponyo instance owns the shared sync lock');
+    } else {
+      try {
+        const migrated = await migrateLegacyUids();
+        if (migrated) console.log('[sync] legacy UID migration complete', migrated);
+      } catch (error) {
+        console.error('[sync] legacy UID migration failed; continuing with existing UIDs', error);
       }
-    });
+
+      await run('startup', async () => {
+        for (const [name, enabled, fn] of startupJobs) {
+          if (!enabled) {
+            console.log(`[sync] startup ${name} disabled`);
+            continue;
+          }
+          try {
+            const details = await fn();
+            console.log(`[sync] startup ${name} complete`, details);
+          } catch (error) {
+            console.error(`[sync] startup ${name} failed`, error);
+          }
+        }
+      });
+    }
+  } catch (error) {
+    console.error('[sync] startup failed before execution:', error.message);
   } finally {
+    if (startupLocked) await releaseDistributedLock(startupLockOwner);
     syncRunning = false;
   }
 

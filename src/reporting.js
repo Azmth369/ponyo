@@ -36,15 +36,15 @@ async function observeActiveEvents() {
 
 async function recoverStaleClaims() {
   const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-  const { error } = await db.from('event_report_publications').update({ state: 'ready', publishing_since: null, last_error: 'Recovered stale publisher claim after restart.' }).eq('state', 'publishing').lt('publishing_since', cutoff);
+  const { error } = await db.from('event_report_publications').update({ state: 'failed', publishing_since: null, last_error: 'Publisher stopped during an in-flight attempt. Check Discord before manually retrying.', updated_at: new Date().toISOString() }).eq('state', 'publishing').lt('publishing_since', cutoff);
   if (error) throw error;
 }
 
 async function prepareDueEvents() {
   const cutoff = new Date(Date.now() - SETTLE_DELAY_MS).toISOString();
-  const due = await rows(db.from('event_report_publications').select('event_type,event_uid,expected_end,state').eq('state', 'active').lte('expected_end', cutoff).order('expected_end', { ascending: true }).limit(10));
+  const due = await rows(db.from('event_report_publications').select('event_type,event_uid,expected_end,state').eq('state', 'active').eq('enabled', true).lte('expected_end', cutoff).order('expected_end', { ascending: true }).limit(10));
   for (const event of due) {
-    const { error } = await db.from('event_report_publications').update({ state: 'ready', last_error: null }).eq('event_type', event.event_type).eq('event_uid', event.event_uid).eq('state', 'active');
+    const { error } = await db.from('event_report_publications').update({ state: 'ready', last_error: null, updated_at: new Date().toISOString() }).eq('event_type', event.event_type).eq('event_uid', event.event_uid).eq('state', 'active').eq('enabled', true);
     if (error) throw error;
   }
   return due;
@@ -81,13 +81,13 @@ async function sendDiscordReport(event, content) {
 }
 
 async function publishReadyEvents() {
-  const ready = await rows(db.from('event_report_publications').select('event_type,event_uid,expected_end,attempts,last_refresh_at').eq('state', 'ready').order('expected_end', { ascending: true }).limit(10));
+  const ready = await rows(db.from('event_report_publications').select('event_type,event_uid,expected_end,attempts,last_refresh_at,state').in('state', ['ready', 'waiting_for_data']).eq('enabled', true).order('expected_end', { ascending: true }).limit(10));
   const results = [];
   for (const event of ready) {
     try {
       const lastRefresh = event.last_refresh_at ? Date.parse(event.last_refresh_at) : 0;
       if (!lastRefresh || Date.now() - lastRefresh >= 5 * 60 * 1000) {
-        const { error } = await db.from('event_report_publications').update({ last_refresh_at: new Date().toISOString() }).eq('event_type', event.event_type).eq('event_uid', event.event_uid).eq('state', 'ready');
+        const { error } = await db.from('event_report_publications').update({ last_refresh_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('event_type', event.event_type).eq('event_uid', event.event_uid).in('state', ['ready', 'waiting_for_data']).eq('enabled', true);
         if (error) throw error;
         if (event.event_type === 'war') {
           const { syncHistory } = await import('./sync.js');
@@ -100,27 +100,39 @@ async function publishReadyEvents() {
 
       const content = await createReport(event);
       if (!content) {
-        const message = 'Final report data is incomplete; will retry on the next report poll.';
-        await db.from('event_report_publications').update({ last_error: message, attempts: Number(event.attempts ?? 0) + 1 }).eq('event_type', event.event_type).eq('event_uid', event.event_uid).eq('state', 'ready');
+        const message = 'Waiting for final report data. Ponyo will check again on the next report poll.';
+        await db.from('event_report_publications').update({ state: 'waiting_for_data', last_error: message, updated_at: new Date().toISOString() }).eq('event_type', event.event_type).eq('event_uid', event.event_uid).in('state', ['ready', 'waiting_for_data']).eq('enabled', true);
         results.push({ event: event.event_uid, state: 'waiting_for_data' });
         continue;
       }
 
-      const { error: claimError } = await db.from('event_report_publications').update({ state: 'publishing', publishing_since: new Date().toISOString(), attempts: Number(event.attempts ?? 0) + 1, last_error: null }).eq('event_type', event.event_type).eq('event_uid', event.event_uid).eq('state', 'ready');
+      const { data: claim, error: claimError } = await db.from('event_report_publications')
+        .update({ state: 'publishing', publishing_since: new Date().toISOString(), attempts: Number(event.attempts ?? 0) + 1, last_error: null, updated_at: new Date().toISOString() })
+        .eq('event_type', event.event_type).eq('event_uid', event.event_uid)
+        .in('state', ['ready', 'waiting_for_data']).eq('enabled', true).is('published_at', null).is('discord_message_id', null)
+        .select('event_uid').maybeSingle();
       if (claimError) throw claimError;
+      if (!claim) continue;
       try {
         const message = await sendDiscordReport(event, content);
-        const { error } = await db.from('event_report_publications').update({ state: 'published', published_at: new Date().toISOString(), discord_message_id: message.id ?? null, publishing_since: null, last_error: null }).eq('event_type', event.event_type).eq('event_uid', event.event_uid);
+        const { error } = await db.from('event_report_publications').update({ state: 'published', published_at: new Date().toISOString(), discord_message_id: message.id ?? null, publishing_since: null, last_error: null, updated_at: new Date().toISOString() }).eq('event_type', event.event_type).eq('event_uid', event.event_uid).eq('state', 'publishing');
         if (error) throw error;
         console.log(`[reports] published ${event.event_type} ${event.event_uid} to Discord message ${message.id}`);
         results.push({ event: event.event_uid, state: 'published' });
       } catch (error) {
-        await db.from('event_report_publications').update({ state: 'ready', publishing_since: null, last_error: String(error?.message ?? error).slice(0, 1000) }).eq('event_type', event.event_type).eq('event_uid', event.event_uid);
+        await db.from('event_report_publications').update({ state: 'failed', publishing_since: null, last_error: String(error?.message ?? error).slice(0, 1000), updated_at: new Date().toISOString() }).eq('event_type', event.event_type).eq('event_uid', event.event_uid).eq('state', 'publishing');
         throw error;
       }
     } catch (error) {
-      console.error(`[reports] failed ${event.event_type} ${event.event_uid}:`, error?.message ?? error);
-      results.push({ event: event.event_uid, state: 'error', error: String(error?.message ?? error) });
+      const message = String(error?.message ?? error).slice(0, 1000);
+      // Stop automatic retry loops after any per-report preparation or send failure.
+      // A user with reports.manage can inspect the error and explicitly retry.
+      await db.from('event_report_publications')
+        .update({ state: 'failed', publishing_since: null, last_error: message, updated_at: new Date().toISOString() })
+        .eq('event_type', event.event_type).eq('event_uid', event.event_uid)
+        .in('state', ['ready', 'waiting_for_data']).eq('enabled', true);
+      console.error(`[reports] failed ${event.event_type} ${event.event_uid}:`, message);
+      results.push({ event: event.event_uid, state: 'error', error: message });
     }
   }
   return results;

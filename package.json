@@ -8,10 +8,12 @@
     "start": "node src/runtime.js",
     "sync": "node src/index.js",
     "sync:once": "node src/sync.js",
-    "test": "node --test src/queryEngine.test.js src/uids.test.js src/sync.test.js src/liveData.test.js src/scopeSignals.test.js src/reportFormat.test.js",
+    "test": "node --test src/queryEngine.test.js src/uids.test.js src/sync.test.js src/liveData.test.js src/scopeSignals.test.js src/reportFormat.test.js dashboard/test/security.test.js",
     "import:legacy": "node src/importLegacyAttackLog.js"
   },
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",
     "discord.js": "^14.24.2",
