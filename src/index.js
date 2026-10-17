@@ -48,13 +48,21 @@ async function claimDistributedLock(owner) {
   const { data, error } = await db.rpc('claim_dashboard_sync_lock', {
     p_owner: owner, p_lease_seconds: 3600
   });
-  if (error) throw error;
+  if (error) {
+    if (/claim_dashboard_sync_lock|PGRST202|42883|could not find the function/i.test(String(error.message || ''))) {
+      console.error('[sync] shared lock migration is not installed; using the existing in-process lock until it is applied');
+      return true;
+    }
+    throw error;
+  }
   return data === true;
 }
 
 async function releaseDistributedLock(owner) {
   const { error } = await db.rpc('release_dashboard_sync_lock', { p_owner: owner });
-  if (error) console.error('[sync] failed to release shared sync lock:', error.message);
+  if (error && !/release_dashboard_sync_lock|PGRST202|42883|could not find the function/i.test(String(error.message || ''))) {
+    console.error('[sync] failed to release shared sync lock:', error.message);
+  }
 }
 
 async function flushPendingJobs() {
