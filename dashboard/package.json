@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Private, read-only Ponyo clan operations dashboard",
+  "description": "Private Ponyo clan operations dashboard with owner-managed access",
   "scripts": {
     "start": "node server.js",
     "check": "node --check server.js && node --check public/app.js"
