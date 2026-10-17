@@ -74,7 +74,7 @@ function renderOperations() {
   const okCount = syncRuns.filter(run => String(run.status).toLowerCase() === 'ok').length;
   const failedCount = syncRuns.filter(run => ['failed', 'error'].includes(String(run.status).toLowerCase())).length;
   const publishedCount = reports.filter(report => report.state === 'published').length;
-  const pendingCount = reports.filter(report => ['active', 'pending', 'publishing'].includes(String(report.state).toLowerCase())).length;
+  const pendingCount = reports.filter(report => report.enabled !== false && ['active', 'ready', 'waiting_for_data', 'pending', 'publishing'].includes(String(report.state).toLowerCase())).length;
   const attentionCount = reports.filter(report => ['failed', 'error', 'abandoned'].includes(String(report.state).toLowerCase())).length;
   const clan = dashboard.data.clanSummary && dashboard.data.clanSummary.data;
   $('#overview-cards').innerHTML = [
@@ -99,11 +99,27 @@ function renderOperations() {
     metric('Active / waiting', number(pendingCount), 'Not yet published'),
     metric('Needs attention', number(attentionCount), 'Failed or abandoned records')
   ].join('');
+  const canManageReports = currentUser?.role === 'owner' || (currentUser?.permissions || []).includes('reports.manage');
   $('#report-table').innerHTML = unavailable('operations') || table(
-    ['Event', 'Type', 'State', 'Attempts', 'Expected end', 'Published at', 'Latest error'],
-    reports.map(report => [escapeHtml(report.event_uid), escapeHtml(report.event_type), stateLabel(report.state), escapeHtml(number(report.attempts)), escapeHtml(date(report.expected_end)), escapeHtml(date(report.published_at)), escapeHtml(report.last_error || '—')]),
+    ['Event', 'Type', 'State', 'Automatic', 'Attempts', 'Expected end', 'Published at', 'Latest error', 'Actions'],
+    reports.map(report => {
+      const state = String(report.state || '').toLowerCase();
+      const isPublished = state === 'published' || Boolean(report.published_at);
+      const enabled = report.enabled !== false;
+      const stateDisplay = !isPublished && !enabled ? stateLabel('paused') : stateLabel(state === 'waiting_for_data' ? 'waiting for data' : report.state);
+      const toggle = canManageReports && !isPublished
+        ? '<button class="table-action" type="button" data-report-toggle="true" data-event-type="' + escapeHtml(report.event_type) + '" data-event-uid="' + escapeHtml(report.event_uid) + '" data-enabled="' + String(!enabled) + '">' + (enabled ? 'Pause' : 'Enable') + '</button>'
+        : '';
+      const retry = canManageReports && state === 'failed' && enabled && !isPublished
+        ? '<button class="table-action danger" type="button" data-report-retry="true" data-event-type="' + escapeHtml(report.event_type) + '" data-event-uid="' + escapeHtml(report.event_uid) + '">Retry</button>'
+        : '';
+      const actions = toggle || retry ? toggle + ' ' + retry : (canManageReports ? '—' : '<span class="muted">Permission required</span>');
+      return [escapeHtml(report.event_uid), escapeHtml(report.event_type), stateDisplay, isPublished ? '—' : (enabled ? 'Enabled' : 'Paused'), escapeHtml(number(report.attempts)), escapeHtml(date(report.expected_end)), escapeHtml(date(report.published_at)), escapeHtml(report.last_error || '—'), actions];
+    }),
     'No report publications have been tracked yet.'
   );
+  $('#report-table').querySelectorAll('[data-report-toggle]').forEach(button => button.addEventListener('click', () => changeReportEnabled(button)));
+  $('#report-table').querySelectorAll('[data-report-retry]').forEach(button => button.addEventListener('click', () => retryReport(button)));
 }
 function renderWar() {
   const payload = dashboard.data.currentWar; const war = payload && payload.data;
@@ -195,7 +211,7 @@ async function loadAccess() {
       rows.map(entry => [
         escapeHtml(entry.email),
         entry.is_active ? 'Active' : 'Revoked',
-        escapeHtml((entry.permissions || []).includes('sync.run') ? 'Run full sync' : 'View only'),
+        escapeHtml([(entry.permissions || []).includes('sync.run') ? 'Run full sync' : '', (entry.permissions || []).includes('reports.manage') ? 'Manage reports' : ''].filter(Boolean).join(', ') || 'View only'),
         escapeHtml(date(entry.updated_at || entry.created_at)),
         '<button class="table-action danger" type="button" data-revoke-email="' + escapeHtml(entry.email) + '">Revoke</button>'
       ]),
@@ -228,6 +244,40 @@ async function loadAudit() {
     );
   } catch (error) {
     $('#audit-table').innerHTML = '<div class="empty">Could not load audit log: ' + escapeHtml(error.message) + '</div>';
+  }
+}
+async function changeReportEnabled(button) {
+  if (!currentUser || !(currentUser.role === 'owner' || (currentUser.permissions || []).includes('reports.manage'))) return;
+  const enabled = button.dataset.enabled === 'true';
+  const eventType = button.dataset.eventType;
+  const eventUid = button.dataset.eventUid;
+  const action = enabled ? 'enable' : 'pause';
+  if (!confirm((enabled ? 'Enable automatic publication for ' : 'Pause future publication attempts for ') + eventType + ' report ' + eventUid + '? A Discord send already in progress cannot be cancelled.')) return;
+  button.disabled = true;
+  try {
+    await api('/api/reports/enabled', { method: 'POST', body: JSON.stringify({ event_type: eventType, event_uid: eventUid, enabled }) });
+    showToast('Report ' + (enabled ? 'enabled' : 'paused'));
+    await loadDashboard();
+    if (currentUser?.role === 'owner') await loadAudit();
+  } catch (error) {
+    showToast(error.message);
+    button.disabled = false;
+  }
+}
+async function retryReport(button) {
+  if (!currentUser || !(currentUser.role === 'owner' || (currentUser.permissions || []).includes('reports.manage'))) return;
+  const eventType = button.dataset.eventType;
+  const eventUid = button.dataset.eventUid;
+  if (!confirm('Retry failed report ' + eventType + ' / ' + eventUid + '? Only reports never marked published are eligible. If a previous Discord request had an ambiguous outcome, the stable Discord nonce helps prevent duplicate posts. Check the Discord channel after retrying.')) return;
+  button.disabled = true; button.textContent = 'Retrying…';
+  try {
+    await api('/api/reports/retry', { method: 'POST', body: JSON.stringify({ event_type: eventType, event_uid: eventUid }) });
+    showToast('Report retry queued');
+    await loadDashboard();
+    if (currentUser?.role === 'owner') await loadAudit();
+  } catch (error) {
+    showToast(error.message);
+    button.disabled = false; button.textContent = 'Retry';
   }
 }
 async function runFullSync() {
@@ -308,12 +358,14 @@ $('#access-form').addEventListener('submit', async event => {
   event.preventDefault();
   if (currentUser?.role !== 'owner') return;
   const email = $('#access-email').value.trim().toLowerCase();
-  const permissions = $('#permission-sync-run').checked ? ['sync.run'] : [];
+  const permissions = [];
+  if ($('#permission-sync-run').checked) permissions.push('sync.run');
+  if ($('#permission-reports-manage').checked) permissions.push('reports.manage');
   const message = $('#access-form-message');
   message.textContent = 'Saving permissions…';
   try {
     await api('/api/access', { method: 'PUT', body: JSON.stringify({ email, permissions }) });
-    message.textContent = permissions.length ? 'Access saved. This account can view the dashboard and run full syncs.' : 'Access saved as view-only.';
+    message.textContent = permissions.length ? 'Access saved with: ' + permissions.map(permission => permission === 'sync.run' ? 'run full syncs' : 'manage Discord reports').join(' and ') + '.' : 'Access saved as view-only.';
     showToast('Permissions saved');
     $('#access-form').reset();
     await loadAccess(); await loadAudit();
