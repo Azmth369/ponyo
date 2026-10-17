@@ -113,7 +113,7 @@ function roleFor(email) {
   const normalized = String(email || '').trim().toLowerCase();
   if (!normalized) return null;
   if (normalized === ownerEmail) return 'owner';
-  if (adminEmails.has(normalized)) return 'admin';
+  if (adminEmails.has(normalized)) return 'viewer';
   return null;
 }
 
@@ -124,7 +124,7 @@ async function currentUser(req) {
     const user = await supabaseRequest('/auth/v1/user', { token });
     const role = roleFor(user.email);
     if (!role) return null;
-    return { id: user.id, email: user.email, role };
+    return { id: user.id, email: user.email, role, permissions: role === 'owner' ? ['*'] : [] };
   } catch {
     return null;
   }
@@ -244,7 +244,7 @@ const server = http.createServer(async (req, res) => {
       const maxAge = Math.max(60, Math.min(SESSION_MAX_AGE, Number(session.expires_in) || SESSION_MAX_AGE));
       const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
       const cookie = SESSION_COOKIE + '=' + encodeURIComponent(session.access_token) + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=' + maxAge + secure;
-      return send(res, 200, { user: { email: user.email, role } }, { 'Set-Cookie': cookie });
+      return send(res, 200, { user: { email: user.email, role, permissions: role === 'owner' ? ['*'] : [] } }, { 'Set-Cookie': cookie });
     } catch (error) {
       const status = error.status === 429 ? 429 : 401;
       return send(res, status, { error: status === 429 ? 'Authentication service is rate-limiting requests. Try again later.' : 'Login failed. Check your credentials and try again.' });
