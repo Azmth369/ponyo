@@ -1,4 +1,4 @@
-# Ponyo Control Panel — Phases 1–5
+# Ponyo Control Panel — Phases 1–5, Phase 6 rollout readiness
 
 A separate Node.js dashboard for the existing Ponyo service. Deploy it as a **new Render web service**; never replace or modify the existing bot service as part of dashboard deployment.
 
@@ -11,6 +11,10 @@ A separate Node.js dashboard for the existing Ponyo service. Deploy it as a **ne
 - Explicitly confirmed full-sync action, protected by a separate control API key and a shared database lock
 - Phase 4 per-report pause/enable controls and manual retry for eligible failed reports, guarded by the `reports.manage` permission
 - Phase 5 security hardening: bounded IP-and-account login throttling, safe malformed-cookie handling, production HSTS, restrictive CSP, and additional browser security headers
+
+## Phase 6 — Controlled rollout readiness
+
+Use the [Phase 6 deployment checklist](DEPLOYMENT_CHECKLIST.md) before any live rollout. It defines the review gates, migration prerequisites, separate Render-service configuration, staged smoke tests, and rollback procedure. This checklist does not authorize production changes; keep the PR in draft and obtain explicit owner approval before merging, applying production migrations, changing production configuration, or deploying.
 
 ## Render setup
 
