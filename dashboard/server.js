@@ -34,6 +34,8 @@ function send(res, status, body, headers = {}) {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer',
     ...headers
   });
   res.end(JSON.stringify(body));
