@@ -42,7 +42,7 @@ function showLogin(message = '') {
 function showApp(user) {
   currentUser = user;
   $('#login-view').classList.add('hidden'); $('#app-view').classList.remove('hidden');
-  $('#user-email').textContent = user.email || ''; $('#user-role').textContent = user.role === 'owner' ? 'Owner' : 'Viewer';
+  $('#user-email').textContent = user.email || ''; $('#user-role').textContent = user.role === 'owner' ? 'Owner' : ((user.permissions || []).includes('reports.manage') ? 'Report manager' : ((user.permissions || []).includes('sync.run') ? 'Sync operator' : 'Viewer'));
   $('#access-nav').classList.toggle('hidden', user.role !== 'owner');
   const canRunSync = user.role === 'owner' || (user.permissions || []).includes('sync.run');
   $('#sync-controls-panel').classList.toggle('hidden', !canRunSync);
