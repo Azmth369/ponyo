@@ -63,8 +63,13 @@ END $$;
 INSERT INTO public.event_report_publications(event_type, event_uid, expected_end, state, enabled, attempts, last_error)
 VALUES
   ('war', 'CW-PHASE4-FAILED', now() - interval '1 day', 'failed', true, 2, 'simulated send failure'),
-  ('war', 'CW-PHASE4-ATOMIC', now() - interval '1 day', 'failed', true, 3, 'simulated send failure'),
-  ('capital_raid', 'CR-PHASE4-PUBLISHED', now() - interval '2 days', 'published', true, 1, null, now() - interval '1 day', 'discord-message-already-sent');
+  ('war', 'CW-PHASE4-ATOMIC', now() - interval '1 day', 'failed', true, 3, 'simulated send failure');
+INSERT INTO public.event_report_publications(
+  event_type, event_uid, expected_end, state, enabled, attempts, published_at, discord_message_id
+) VALUES (
+  'capital_raid', 'CR-PHASE4-PUBLISHED', now() - interval '2 days', 'published', true, 1,
+  now() - interval '1 day', 'discord-message-already-sent'
+);
 
 DO $
 DECLARE result jsonb;
