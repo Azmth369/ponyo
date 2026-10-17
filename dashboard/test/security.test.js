@@ -42,9 +42,10 @@ function listen(server) {
 async function request(path, options = {}) {
   return fetch(dashboardBase + path, options);
 }
-async function login(email, includeOrigin = true) {
+async function login(email, includeOrigin = true, forwardedFor) {
   const headers = { 'content-type': 'application/json' };
   if (includeOrigin) headers.origin = dashboardBase;
+  if (forwardedFor) headers['x-forwarded-for'] = forwardedFor;
   const response = await request('/api/login', {
     method: 'POST', headers,
     body: JSON.stringify({ email, password: 'correct-horse-battery-staple' })
@@ -242,9 +243,9 @@ test('security headers are present and malformed session cookies fail closed', a
 
 test('login throttling is enforced per approved account', async () => {
   for (let i = 0; i < 10; i++) {
-    const attempt = await login(RATE_LIMIT_USER);
+    const attempt = await login(RATE_LIMIT_USER, true, '203.0.113.' + (i + 1));
     assert.equal(attempt.response.status, 200, 'attempt ' + (i + 1) + ' should be accepted within the configured limit');
   }
-  const blocked = await login(RATE_LIMIT_USER);
+  const blocked = await login(RATE_LIMIT_USER, true, '203.0.113.99');
   assert.equal(blocked.response.status, 429);
 });
