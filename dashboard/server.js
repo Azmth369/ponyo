@@ -12,8 +12,6 @@ const MAX_BODY_BYTES = 16 * 1024;
 const loginAttempts = new Map();
 
 const ownerEmail = (process.env.DASHBOARD_OWNER_EMAIL || '').trim().toLowerCase();
-const adminEmails = new Set((process.env.DASHBOARD_ADMIN_EMAILS || '')
-  .split(',').map(value => value.trim().toLowerCase()).filter(Boolean));
 
 function configuration() {
   return {
@@ -21,7 +19,8 @@ function configuration() {
     supabaseAnonKey: Boolean(process.env.SUPABASE_ANON_KEY),
     ownerEmail: Boolean(ownerEmail),
     ponyoApiUrl: Boolean(process.env.PONYO_API_URL),
-    ponyoApiKey: Boolean(process.env.PONYO_API_KEY)
+    ponyoApiKey: Boolean(process.env.PONYO_API_KEY),
+    ponyoControlApiKey: Boolean(process.env.PONYO_CONTROL_API_KEY)
   };
 }
 
@@ -112,9 +111,37 @@ async function supabaseRequest(path, options = {}) {
 function roleFor(email) {
   const normalized = String(email || '').trim().toLowerCase();
   if (!normalized) return null;
-  if (normalized === ownerEmail) return 'owner';
-  if (adminEmails.has(normalized)) return 'viewer';
-  return null;
+  return normalized === ownerEmail ? 'owner' : null;
+}
+
+async function ponyoControl(path, options = {}, actorEmail = '') {
+  const base = (process.env.PONYO_API_URL || '').replace(/\\/+$/, '');
+  const response = await fetch(base + '/api/v1/dashboard' + path, {
+    method: options.method || 'GET',
+    headers: {
+      Authorization: 'Bearer ' + process.env.PONYO_CONTROL_API_KEY,
+      'X-Dashboard-User-Email': String(actorEmail || '').trim().toLowerCase(),
+      Accept: 'application/json',
+      ...(options.body ? { 'Content-Type': 'application/json' } : {})
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined,
+    signal: AbortSignal.timeout(15000)
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload.error || 'Ponyo control request failed');
+    error.status = response.status;
+    throw error;
+  }
+  return payload;
+}
+
+async function accessForEmail(email) {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === ownerEmail) return { approved: true, email: normalized, role: 'owner', permissions: ['*'] };
+  const result = await ponyoControl('/access/check?email=' + encodeURIComponent(normalized));
+  return result.approved ? result : null;
 }
 
 async function currentUser(req) {
@@ -122,9 +149,9 @@ async function currentUser(req) {
   if (!token || !isConfigured()) return null;
   try {
     const user = await supabaseRequest('/auth/v1/user', { token });
-    const role = roleFor(user.email);
-    if (!role) return null;
-    return { id: user.id, email: user.email, role, permissions: role === 'owner' ? ['*'] : [] };
+    const access = await accessForEmail(user.email);
+    if (!access) return null;
+    return { id: user.id, email: user.email, role: access.role, permissions: access.permissions || [] };
   } catch {
     return null;
   }
@@ -235,16 +262,17 @@ const server = http.createServer(async (req, res) => {
       const email = String(body.email || '').trim().toLowerCase();
       const password = String(body.password || '');
       if (!email || !password || password.length > 1024) return send(res, 400, { error: 'Enter your email and password.' });
-      if (!roleFor(email)) return send(res, 403, { error: 'This account has not been approved for the Ponyo Control Panel.' });
+      const initialAccess = await accessForEmail(email);
+      if (!initialAccess) return send(res, 403, { error: 'This account has not been approved by the dashboard owner.' });
       const session = await supabaseRequest('/auth/v1/token?grant_type=password', { method: 'POST', body: { email, password } });
       if (!session.access_token) return send(res, 401, { error: 'Login failed. Check your credentials.' });
       const user = await supabaseRequest('/auth/v1/user', { token: session.access_token });
-      const role = roleFor(user.email);
-      if (!role) return send(res, 403, { error: 'This account has not been approved for the Ponyo Control Panel.' });
+      const access = await accessForEmail(user.email);
+      if (!access) return send(res, 403, { error: 'This account has not been approved by the dashboard owner.' });
       const maxAge = Math.max(60, Math.min(SESSION_MAX_AGE, Number(session.expires_in) || SESSION_MAX_AGE));
       const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
       const cookie = SESSION_COOKIE + '=' + encodeURIComponent(session.access_token) + '; Path=/; HttpOnly; SameSite=Lax; Max-Age=' + maxAge + secure;
-      return send(res, 200, { user: { email: user.email, role, permissions: role === 'owner' ? ['*'] : [] } }, { 'Set-Cookie': cookie });
+      return send(res, 200, { user: { email: user.email, role: access.role, permissions: access.permissions || [] } }, { 'Set-Cookie': cookie });
     } catch (error) {
       const status = error.status === 429 ? 429 : 401;
       return send(res, status, { error: status === 429 ? 'Authentication service is rate-limiting requests. Try again later.' : 'Login failed. Check your credentials and try again.' });
@@ -259,6 +287,57 @@ const server = http.createServer(async (req, res) => {
     const user = await currentUser(req);
     if (!user) return send(res, 401, { error: 'Please sign in with an approved administrator account.' });
     return send(res, 200, { user });
+  }
+  if (req.method === 'GET' && url.pathname === '/api/access') {
+    const user = await currentUser(req);
+    if (!user) return send(res, 401, { error: 'Please sign in again.' });
+    if (user.role !== 'owner') return send(res, 403, { error: 'Only the owner can manage access.' });
+    try { return send(res, 200, await ponyoControl('/access', {}, user.email)); }
+    catch (error) { return send(res, error.status || 502, { error: cleanError(error.message) }); }
+  }
+  if (req.method === 'GET' && url.pathname === '/api/audit') {
+    const user = await currentUser(req);
+    if (!user) return send(res, 401, { error: 'Please sign in again.' });
+    if (user.role !== 'owner') return send(res, 403, { error: 'Only the owner can view the audit log.' });
+    try { return send(res, 200, await ponyoControl('/audit', {}, user.email)); }
+    catch (error) { return send(res, error.status || 502, { error: cleanError(error.message) }); }
+  }
+  if (req.method === 'PUT' && url.pathname === '/api/access') {
+    if (!sameOrigin(req)) return send(res, 403, { error: 'Request origin rejected' });
+    const user = await currentUser(req);
+    if (!user) return send(res, 401, { error: 'Please sign in again.' });
+    if (user.role !== 'owner') return send(res, 403, { error: 'Only the owner can grant permissions.' });
+    try {
+      const body = await readJson(req);
+      return send(res, 200, await ponyoControl('/access', { method: 'PUT', body }, user.email));
+    } catch (error) { return send(res, error.status || 502, { error: cleanError(error.message) }); }
+  }
+  if (req.method === 'DELETE' && url.pathname === '/api/access') {
+    if (!sameOrigin(req)) return send(res, 403, { error: 'Request origin rejected' });
+    const user = await currentUser(req);
+    if (!user) return send(res, 401, { error: 'Please sign in again.' });
+    if (user.role !== 'owner') return send(res, 403, { error: 'Only the owner can revoke permissions.' });
+    const email = String(url.searchParams.get('email') || '').trim().toLowerCase();
+    try { return send(res, 200, await ponyoControl('/access?email=' + encodeURIComponent(email), { method: 'DELETE' }, user.email)); }
+    catch (error) { return send(res, error.status || 502, { error: cleanError(error.message) }); }
+  }
+  if (req.method === 'POST' && url.pathname === '/api/sync/refresh') {
+    if (!sameOrigin(req)) return send(res, 403, { error: 'Request origin rejected' });
+    const user = await currentUser(req);
+    if (!user) return send(res, 401, { error: 'Please sign in again.' });
+    if (!(user.role === 'owner' || (user.permissions || []).includes('sync.run'))) return send(res, 403, { error: 'You do not have permission to run syncs.' });
+    try {
+      const body = await readJson(req);
+      return send(res, 202, await ponyoControl('/sync/refresh', { method: 'POST', body }, user.email));
+    } catch (error) { return send(res, error.status || 502, { error: cleanError(error.message) }); }
+  }
+  if (req.method === 'GET' && url.pathname === '/api/sync/refresh-status') {
+    const user = await currentUser(req);
+    if (!user) return send(res, 401, { error: 'Please sign in again.' });
+    if (!(user.role === 'owner' || (user.permissions || []).includes('sync.run'))) return send(res, 403, { error: 'You do not have permission to view sync control status.' });
+    const id = String(url.searchParams.get('id') || '');
+    try { return send(res, 200, await ponyoControl('/sync/refresh-status?id=' + encodeURIComponent(id), {}, user.email)); }
+    catch (error) { return send(res, error.status || 502, { error: cleanError(error.message) }); }
   }
   if (req.method === 'GET' && url.pathname === '/api/dashboard') {
     if (!isConfigured()) return send(res, 503, { error: 'Dashboard setup is incomplete.' });
