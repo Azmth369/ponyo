@@ -126,13 +126,22 @@ async function publishReadyEvents() {
   return results;
 }
 
+let postingConfigWarningShown = false;
+
 export async function processEventReports() {
   try {
     await observeActiveEvents();
     await recoverStaleClaims();
     const due = await prepareDueEvents();
+    if (!token || !channelId) {
+      if (!postingConfigWarningShown) {
+        console.warn('[reports] tracking events, but automatic posting is paused: configure DISCORD_TOKEN and PONYO_DATA_REPORT_CHANNEL_ID.');
+        postingConfigWarningShown = true;
+      }
+      return { observed: true, due: due.length, postingConfigured: false, results: [] };
+    }
     const results = await publishReadyEvents();
-    return { observed: true, due: due.length, results };
+    return { observed: true, due: due.length, postingConfigured: true, results };
   } catch (error) {
     console.error('[reports] scheduler tick failed:', error?.message ?? error);
     return { error: String(error?.message ?? error) };
