@@ -9,8 +9,9 @@ const OWNER = 'owner@example.com';
 const VIEWER = 'viewer@example.com';
 const RUNNER = 'runner@example.com';
 const REPORT_MANAGER = 'reports@example.com';
-const active = new Set([VIEWER, RUNNER, REPORT_MANAGER]);
-const permissions = new Map([[VIEWER, []], [RUNNER, ['sync.run']], [REPORT_MANAGER, ['reports.manage']]]);
+const RATE_LIMIT_USER = 'ratelimit@example.com';
+const active = new Set([VIEWER, RUNNER, REPORT_MANAGER, RATE_LIMIT_USER]);
+const permissions = new Map([[VIEWER, []], [RUNNER, ['sync.run']], [REPORT_MANAGER, ['reports.manage']], [RATE_LIMIT_USER, []]]);
 let upstream;
 let dashboard;
 let dashboardBase;
@@ -27,7 +28,7 @@ async function body(req) {
   return raw ? JSON.parse(raw) : {};
 }
 function emailForToken(token) {
-  return ({ 'owner-token': OWNER, 'viewer-token': VIEWER, 'runner-token': RUNNER, 'reports-token': REPORT_MANAGER })[token] || null;
+  return ({ 'owner-token': OWNER, 'viewer-token': VIEWER, 'runner-token': RUNNER, 'reports-token': REPORT_MANAGER, 'rate-limit-token': RATE_LIMIT_USER })[token] || null;
 }
 function listen(server) {
   return new Promise((resolve, reject) => {
@@ -67,7 +68,7 @@ before(async () => {
     try {
       if (url.pathname === '/auth/v1/token' && req.method === 'POST') {
         const input = await body(req);
-        const tokens = { [OWNER]: 'owner-token', [VIEWER]: 'viewer-token', [RUNNER]: 'runner-token', [REPORT_MANAGER]: 'reports-token' };
+        const tokens = { [OWNER]: 'owner-token', [VIEWER]: 'viewer-token', [RUNNER]: 'runner-token', [REPORT_MANAGER]: 'reports-token', [RATE_LIMIT_USER]: 'rate-limit-token' };
         if (!tokens[input.email] || input.password !== 'correct-horse-battery-staple') return json(res, 401, { message: 'Invalid login' });
         return json(res, 200, { access_token: tokens[input.email], expires_in: 3600 });
       }
@@ -226,4 +227,24 @@ test('report management permission is required for pause, enable, and retry', as
     body: JSON.stringify({ event_type: 'war', event_uid: 'CW-123' })
   });
   assert.equal(noOrigin.status, 403);
+});
+
+test('security headers are present and malformed session cookies fail closed', async () => {
+  const health = await request('/health');
+  assert.equal(health.status, 200);
+  assert.equal(health.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(health.headers.get('x-frame-options'), 'DENY');
+  assert.equal(health.headers.get('content-security-policy')?.includes("frame-ancestors 'none'"), true);
+  assert.equal(health.headers.get('permissions-policy')?.includes('camera=()'), true);
+  const malformed = await session('ponyo_dashboard_session=%E0%A4%A');
+  assert.equal(malformed.status, 401);
+});
+
+test('login throttling is enforced per approved account', async () => {
+  for (let i = 0; i < 10; i++) {
+    const attempt = await login(RATE_LIMIT_USER);
+    assert.equal(attempt.response.status, 200, 'attempt ' + (i + 1) + ' should be accepted within the configured limit');
+  }
+  const blocked = await login(RATE_LIMIT_USER);
+  assert.equal(blocked.response.status, 429);
 });
