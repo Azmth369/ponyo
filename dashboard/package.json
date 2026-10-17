@@ -1,0 +1,12 @@
+{
+  "name": "ponyo-control-panel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Private, read-only Ponyo clan operations dashboard",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check public/app.js"
+  },
+  "engines": { "node": ">=22" }
+}
