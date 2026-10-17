@@ -321,6 +321,22 @@ const server = http.createServer(async (req, res) => {
     try { return send(res, 200, await ponyoControl('/access?email=' + encodeURIComponent(email), { method: 'DELETE' }, user.email)); }
     catch (error) { return send(res, error.status || 502, { error: cleanError(error.message) }); }
   }
+  if (req.method === 'POST' && ['/api/reports/enabled', '/api/reports/retry'].includes(url.pathname)) {
+    if (!sameOrigin(req)) return send(res, 403, { error: 'Request origin rejected' });
+    const user = await currentUser(req);
+    if (!user) return send(res, 401, { error: 'Please sign in again.' });
+    if (!(user.role === 'owner' || (user.permissions || []).includes('reports.manage'))) {
+      return send(res, 403, { error: 'You do not have permission to manage Discord reports.' });
+    }
+    try {
+      const body = await readJson(req);
+      const path = url.pathname === '/api/reports/enabled' ? '/reports/enabled' : '/reports/retry';
+      return send(res, url.pathname === '/api/reports/retry' ? 202 : 200,
+        await ponyoControl(path, { method: 'POST', body }, user.email));
+    } catch (error) {
+      return send(res, error.status || 502, { error: cleanError(error.message) });
+    }
+  }
   if (req.method === 'POST' && url.pathname === '/api/sync/refresh') {
     if (!sameOrigin(req)) return send(res, 403, { error: 'Request origin rejected' });
     const user = await currentUser(req);
