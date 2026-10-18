@@ -68,20 +68,29 @@ async function saveNormalWarSummary(war, session) {
     opponent_clan_destruction: session.opponent_clan_destruction
   };
   const { data: existing, error: lookupError } = await db
-    .from('cw_session').select('cw_uid').eq('cw_uid', session.cw_uid).maybeSingle();
+    .from('cw_session')
+    .select('cw_uid,opponent_clan_name,opponent_clan_id,size,battle_start,battle_end,result,our_clan_score,opponent_clan_score,our_clan_destruction,opponent_clan_destruction')
+    .eq('cw_uid', session.cw_uid).maybeSingle();
   if (lookupError) throw lookupError;
 
   if (existing) {
-    // Never let missing fields from a summary overwrite known detailed values.
+    // Summary-only war-log entries do not include startTime or clan tags.
+    // Preserve known values and fill only gaps from this row's actual payload.
     const summaryPatch = Object.fromEntries(
-      Object.entries(summary).filter(([, value]) => value != null)
+      Object.entries(summary).filter(([key, value]) => value != null && existing[key] == null)
     );
-    // Update summary fields only. Preserve participants, attack counts and the
-    // richer currentwar payload already stored for this session.
-    const { error } = await db.from('cw_session').update(summaryPatch).eq('cw_uid', session.cw_uid);
+    // Non-null result and score values from the official war log are authoritative.
+    for (const key of ['result', 'our_clan_score', 'opponent_clan_score']) {
+      if (summary[key] != null) summaryPatch[key] = summary[key];
+    }
+    const { error } = await db.from('cw_session').update({
+      ...summaryPatch,
+      data: war
+    }).eq('cw_uid', session.cw_uid);
     if (error) throw error;
   } else {
-    // A summary-only historical war is still useful, but it has no player rows.
+    // A summary-only historical war is still useful, but avoid pretending that
+    // an absent start time or clan identity is known.
     await upsert('cw_session', [{
       ...session,
       ...summary,
