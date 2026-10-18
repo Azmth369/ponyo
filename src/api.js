@@ -699,20 +699,43 @@ export async function handleApi(req, res, url) {
 
     if (req.method === 'GET' && url.pathname === '/api/v1/war/history') {
       const limit = Math.min(50, Math.max(1, Number(url.searchParams.get('limit')) || 10));
-      const stored = await rows(db.from('cw_session').select('cw_uid,opponent_clan_name,opponent_clan_id,size,battle_start,battle_end,result,our_clan_score,opponent_clan_score,our_clan_destruction,opponent_clan_destruction').order('battle_start', { ascending: false }).limit(limit));
-      // This endpoint reads cw_session only: these are regular Clan War records,
-      // not CWL rounds. Older rows may contain invalid destruction values; never
-      // present a value outside the API's 0-100 percentage range as a percentage.
-      const data = stored.map(war => ({
-        ...war,
-        warType: 'Clan War',
-        our_clan_destruction: Number.isFinite(Number(war.our_clan_destruction)) &&
-          Number(war.our_clan_destruction) >= 0 && Number(war.our_clan_destruction) <= 100
-          ? Number(war.our_clan_destruction) : null,
-        opponent_clan_destruction: Number.isFinite(Number(war.opponent_clan_destruction)) &&
-          Number(war.opponent_clan_destruction) >= 0 && Number(war.opponent_clan_destruction) <= 100
-          ? Number(war.opponent_clan_destruction) : null
-      }));
+      const stored = await rows(db.from('cw_session')
+        .select('cw_uid,opponent_clan_name,opponent_clan_id,size,battle_start,battle_end,result,our_clan_score,opponent_clan_score,our_clan_destruction,opponent_clan_destruction')
+        .order('battle_start', { ascending: false, nullsFirst: false })
+        .order('battle_end', { ascending: false, nullsFirst: false })
+        .limit(500));
+      // Legacy rows may have null battle_start/opponent metadata. Order by a
+      // trustworthy available timestamp and exclude blank/duplicate rows rather
+      // than allowing null-date records to crowd the visible history.
+      const seen = new Set();
+      const data = stored
+        .filter(war => war.cw_uid && (war.battle_start || war.battle_end))
+        .sort((a, b) => {
+          const at = Date.parse(a.battle_start || a.battle_end || '');
+          const bt = Date.parse(b.battle_start || b.battle_end || '');
+          return (Number.isFinite(bt) ? bt : -Infinity) - (Number.isFinite(at) ? at : -Infinity);
+        })
+        .filter(war => {
+          const key = war.opponent_clan_id
+            ? String(war.opponent_clan_id).replace(/^#/, '').toUpperCase() + ':' + (war.battle_end || war.battle_start)
+            : String(war.cw_uid);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        })
+        .slice(0, limit)
+        .map(war => ({
+          ...war,
+          opponent_clan_name: war.opponent_clan_name || 'Unknown opponent',
+          battle_start: war.battle_start || null,
+          warType: 'Clan War',
+          our_clan_destruction: Number.isFinite(Number(war.our_clan_destruction)) &&
+            war.our_clan_destruction != null && Number(war.our_clan_destruction) >= 0 && Number(war.our_clan_destruction) <= 100
+            ? Number(war.our_clan_destruction) : null,
+          opponent_clan_destruction: Number.isFinite(Number(war.opponent_clan_destruction)) &&
+            war.opponent_clan_destruction != null && Number(war.opponent_clan_destruction) >= 0 && Number(war.opponent_clan_destruction) <= 100
+            ? Number(war.opponent_clan_destruction) : null
+        }));
       send(res, 200, {
         data, count: data.length, source: 'supabase',
         warType: 'regular_clan_war',
