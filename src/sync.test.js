@@ -35,6 +35,28 @@ const war = {
   }
 };
 
+
+test('summary sync backfill preserves populated fields and only fills missing metadata', () => {
+  const current = {
+    opponent_clan_name: 'Verified Opponent',
+    opponent_clan_id: '#OPP',
+    battle_start: '2026-09-15T10:15:00.000Z',
+    battle_end: '2026-09-17T10:15:00.000Z'
+  };
+  const incoming = {
+    opponent_clan_name: null,
+    opponent_clan_id: null,
+    battle_start: null,
+    battle_end: '2026-09-17T10:15:00.000Z'
+  };
+  const merged = Object.fromEntries(
+    Object.entries(incoming).filter(([key, value]) => value != null && current[key] == null)
+  );
+  assert.deepEqual(merged, {});
+  assert.equal(current.opponent_clan_name, 'Verified Opponent');
+  assert.equal(current.battle_start, '2026-09-15T10:15:00.000Z');
+});
+
 test('cocStamp parses CoC API timestamps to ISO', () => {
   assert.equal(cocStamp('20260915T101500.000Z'), '2026-09-15T10:15:00.000Z');
   assert.equal(cocStamp(null), null);
