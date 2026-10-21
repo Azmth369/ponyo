@@ -52,6 +52,15 @@ async function prepareDueEvents() {
   const cutoff = new Date(Date.now() - SETTLE_DELAY_MS).toISOString();
   const due = await rows(db.from('event_report_publications').select('event_type,event_uid,expected_end,state').eq('state', 'active').eq('enabled', true).lte('expected_end', cutoff).order('expected_end', { ascending: true }).limit(10));
   for (const event of due) {
+    if (event.event_type === 'war') {
+      const session = await one(db.from('cw_session').select('result,data').eq('cw_uid', event.event_uid).maybeSingle());
+      // A due timestamp alone is not proof that the war has ended. In
+      // particular, do not publish a stale preparation snapshot as a result.
+      if (!session || (session.data?.state !== 'warEnded' && session.result == null)) {
+        console.warn(`[reports] keeping war ${event.event_uid} active until sync confirms warEnded`);
+        continue;
+      }
+    }
     const { error } = await db.from('event_report_publications').update({ state: 'ready', last_error: null, updated_at: new Date().toISOString() }).eq('event_type', event.event_type).eq('event_uid', event.event_uid).eq('state', 'active').eq('enabled', true);
     if (error) throw error;
   }
