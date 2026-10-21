@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  parseSeq, formatSeq, nextSeq, isLegacyUid,
+  parseSeq, formatSeq, nextSeq, isLegacyUid, warWindowsOverlap,
   warAttackUid, cwlDayUid, cwlAttackUid, capitalRaidUid, capitalAttackUid
 } from './uids.js';
 import { formatIST, formatDiscordTimestamps } from './format.js';
@@ -39,6 +39,18 @@ test('attack and day UID builders follow the spreadsheet scheme', () => {
   assert.equal(cwlAttackUid('CWL001-D2', 3), 'CWL001-D2-ATK03');
   assert.equal(capitalRaidUid('CR001', 2), 'CR001-R2');
   assert.equal(capitalAttackUid('CR001-R2', 5), 'CR001-R2-ATK005');
+});
+
+test('warWindowsOverlap bridges preparation-to-battle timestamp changes safely', () => {
+  assert.equal(warWindowsOverlap(
+    '2026-10-20T23:02:05Z', '2026-10-21T23:02:05Z',
+    '2026-10-20T23:36:55Z', '2026-10-22T00:01:37Z'
+  ), true);
+  assert.equal(warWindowsOverlap(
+    '2026-10-20T00:00:00Z', '2026-10-20T10:00:00Z',
+    '2026-10-20T10:00:01Z', '2026-10-20T20:00:00Z'
+  ), false);
+  assert.equal(warWindowsOverlap(null, '2026-10-21T23:02:05Z', '2026-10-20T23:36:55Z', '2026-10-22T00:01:37Z'), false);
 });
 
 test('formatIST renders IST with DD/MM/YYYY and 24h time', () => {
