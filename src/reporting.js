@@ -28,8 +28,16 @@ async function trackIfMissing(type, uid, end) {
 
 async function observeActiveEvents() {
   const now = new Date().toISOString();
-  const wars = await rows(db.from('cw_session').select('cw_uid,battle_end').gt('battle_end', now).not('battle_end', 'is', null).order('battle_end', { ascending: true }).limit(5));
-  for (const w of wars) if (w.cw_uid && w.battle_end) await trackIfMissing('war', w.cw_uid, w.battle_end);
+  // A future battle_end alone is not enough to identify a live war: war-log
+  // summaries and stale preparation snapshots can retain future timestamps.
+  // Only a currentwar payload explicitly in the battle phase should create a
+  // new automatic war-report publication row.
+  const wars = await rows(db.from('cw_session').select('cw_uid,battle_end,data').gt('battle_end', now).not('battle_end', 'is', null).order('battle_end', { ascending: true }).limit(20));
+  for (const w of wars) {
+    if (w.cw_uid && w.battle_end && w.data?.state === 'inWar') {
+      await trackIfMissing('war', w.cw_uid, w.battle_end);
+    }
+  }
   const raids = await rows(db.from('capital_raid_season').select('generated_uid,battle_end').gt('battle_end', now).not('battle_end', 'is', null).order('battle_end', { ascending: true }).limit(5));
   for (const r of raids) if (r.generated_uid && r.battle_end) await trackIfMissing('capital_raid', r.generated_uid, r.battle_end);
 }
