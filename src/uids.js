@@ -39,3 +39,16 @@ export const cwlDayUid = (seasonUid, day) => `${seasonUid}-D${day}`;
 export const cwlAttackUid = (dayUid, n) => `${dayUid}-ATK${String(n).padStart(2, '0')}`;
 export const capitalRaidUid = (seasonUid, raidNo) => `${seasonUid}-R${raidNo}`;
 export const capitalAttackUid = (raidUid, n) => `${raidUid}-ATK${String(n).padStart(3, '0')}`;
+
+
+// True when two valid time windows overlap. Used only together with the same
+// opponent clan tag to bridge the CoC API's preparation -> inWar timestamp
+// transition without merging separate rematches against that clan.
+export function warWindowsOverlap(startA, endA, startB, endB) {
+  const aStart = startA == null ? NaN : new Date(startA).getTime();
+  const aEnd = endA == null ? NaN : new Date(endA).getTime();
+  const bStart = startB == null ? NaN : new Date(startB).getTime();
+  const bEnd = endB == null ? NaN : new Date(endB).getTime();
+  if (![aStart, aEnd, bStart, bEnd].every(Number.isFinite)) return false;
+  return aStart <= bEnd && bStart <= aEnd;
+}
