@@ -28,8 +28,16 @@ async function trackIfMissing(type, uid, end) {
 
 async function observeActiveEvents() {
   const now = new Date().toISOString();
-  const wars = await rows(db.from('cw_session').select('cw_uid,battle_end').gt('battle_end', now).not('battle_end', 'is', null).order('battle_end', { ascending: true }).limit(5));
-  for (const w of wars) if (w.cw_uid && w.battle_end) await trackIfMissing('war', w.cw_uid, w.battle_end);
+  // A future battle_end alone is not enough to identify a live war: war-log
+  // summaries and stale preparation snapshots can retain future timestamps.
+  // Only a currentwar payload explicitly in the battle phase should create a
+  // new automatic war-report publication row.
+  const wars = await rows(db.from('cw_session').select('cw_uid,battle_end,data').gt('battle_end', now).not('battle_end', 'is', null).order('battle_end', { ascending: true }).limit(20));
+  for (const w of wars) {
+    if (w.cw_uid && w.battle_end && w.data?.state === 'inWar') {
+      await trackIfMissing('war', w.cw_uid, w.battle_end);
+    }
+  }
   const raids = await rows(db.from('capital_raid_season').select('generated_uid,battle_end').gt('battle_end', now).not('battle_end', 'is', null).order('battle_end', { ascending: true }).limit(5));
   for (const r of raids) if (r.generated_uid && r.battle_end) await trackIfMissing('capital_raid', r.generated_uid, r.battle_end);
 }
@@ -44,6 +52,15 @@ async function prepareDueEvents() {
   const cutoff = new Date(Date.now() - SETTLE_DELAY_MS).toISOString();
   const due = await rows(db.from('event_report_publications').select('event_type,event_uid,expected_end,state').eq('state', 'active').eq('enabled', true).lte('expected_end', cutoff).order('expected_end', { ascending: true }).limit(10));
   for (const event of due) {
+    if (event.event_type === 'war') {
+      const session = await one(db.from('cw_session').select('result,data').eq('cw_uid', event.event_uid).maybeSingle());
+      // A due timestamp alone is not proof that the war has ended. In
+      // particular, do not publish a stale preparation snapshot as a result.
+      if (!session || (session.data?.state !== 'warEnded' && session.result == null)) {
+        console.warn(`[reports] keeping war ${event.event_uid} active until sync confirms warEnded`);
+        continue;
+      }
+    }
     const { error } = await db.from('event_report_publications').update({ state: 'ready', last_error: null, updated_at: new Date().toISOString() }).eq('event_type', event.event_type).eq('event_uid', event.event_uid).eq('state', 'active').eq('enabled', true);
     if (error) throw error;
   }

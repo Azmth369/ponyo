@@ -123,9 +123,13 @@ export async function saveNormalWar(war, cwUid) {
 }
 
 async function resolveWarUid(war) {
+  const opponentTag = war.clan?.tag === clanTag
+    ? war.opponent?.tag
+    : war.clan?.tag ?? war.opponent?.tag;
   const existing = await findWarSessionUid({
     battleStart: cocStamp(war.startTime),
-    battleEnd: cocStamp(war.endTime)
+    battleEnd: cocStamp(war.endTime),
+    opponentTag
   });
   return existing ?? await allocateSeq('cw_session', 'cw_uid', 'CW');
 }

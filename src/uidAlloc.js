@@ -6,7 +6,7 @@
 // are created when the current war or a league day is polled repeatedly.
 
 import { db } from './db.js';
-import { formatSeq, nextSeq } from './uids.js';
+import { formatSeq, nextSeq, warWindowsOverlap } from './uids.js';
 
 async function selectUids(table, column, limit = 5000) {
   const { data, error } = await db.from(table).select(column).limit(limit);
@@ -42,17 +42,34 @@ const sameInstant = (a, b) =>
 // A normal war session is identified by its battle window. The currentwar
 // endpoint provides startTime; warlog entries only provide endTime, so both
 // are accepted as identity.
-export async function findWarSessionUid({ battleStart, battleEnd }) {
+export async function findWarSessionUid({ battleStart, battleEnd, opponentTag = null }) {
   const rows = await recentRows(
     'cw_session',
-    'cw_uid,battle_start,battle_end',
+    'cw_uid,battle_start,battle_end,opponent_clan_id',
     [{ column: 'battle_start', ascending: false, nullsFirst: false }],
     300
   );
-  const row = rows.find(r =>
-    sameInstant(battleStart, r.battle_start) || sameInstant(battleEnd, r.battle_end)
-  );
-  return row?.cw_uid ?? null;
+  // Prefer exact timestamp identity first; start/end values can be absent on
+  // war-log summaries, so retain the matching fallbacks for those payloads.
+  const exact = rows.find(r =>
+    sameInstant(battleStart, r.battle_start) && sameInstant(battleEnd, r.battle_end)
+  ) ?? rows.find(r => sameInstant(battleStart, r.battle_start))
+    ?? rows.find(r => sameInstant(battleEnd, r.battle_end));
+  if (exact) return exact.cw_uid;
+
+  // During preparation -> inWar, CoC can change the reported time window.
+  // A same-opponent overlapping window is a safe fallback because a clan cannot
+  // have two normal wars running simultaneously. Never match by opponent alone.
+  if (opponentTag && battleStart && battleEnd) {
+    const normalizeTag = value => String(value ?? '').replace(/^#/, '').toUpperCase();
+    const targetTag = normalizeTag(opponentTag);
+    const overlapping = rows.find(r =>
+      normalizeTag(r.opponent_clan_id) === targetTag &&
+      warWindowsOverlap(battleStart, battleEnd, r.battle_start, r.battle_end)
+    );
+    if (overlapping) return overlapping.cw_uid;
+  }
+  return null;
 }
 
 // CWL seasons are identified by the league season date in the group payload.
