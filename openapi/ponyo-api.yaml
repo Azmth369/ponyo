@@ -8,6 +8,7 @@ servers:
 security:
   - BearerAuth: []
 components:
+  schemas: {}
   securitySchemes:
     BearerAuth:
       type: http
