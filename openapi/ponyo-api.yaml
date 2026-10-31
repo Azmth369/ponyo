@@ -4,7 +4,14 @@ info:
   version: 1.0.5
   description: Read clan roster, activity estimates, war history, Capital Raid data, player contribution, and sync status. Refresh only when explicitly requested.
 servers:
-  - url: https://ponyo-v845.onrender.com
+  - url: https://ponyo-azmth.onrender.com
+security:
+  - BearerAuth: []
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
 paths:
   /api/v1/clan/player-capital-contribution:
     get:
